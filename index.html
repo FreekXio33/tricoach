@@ -322,6 +322,10 @@ async function exchangeToken(code) {
 }
 
 async function refreshToken(refresh_token) {
+  // Preserve athlete from saved token: Strava's refresh response does not include the athlete object
+  const saved = localStorage.getItem('strava_token');
+  const savedAthlete = saved ? (JSON.parse(saved).athlete || null) : null;
+
   const res = await fetch('https://www.strava.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -329,6 +333,7 @@ async function refreshToken(refresh_token) {
   });
   const data = await res.json();
   if (data.access_token) {
+    if (!data.athlete && savedAthlete) data.athlete = savedAthlete;
     localStorage.setItem('strava_token', JSON.stringify(data));
     await loadApp(data);
   }
