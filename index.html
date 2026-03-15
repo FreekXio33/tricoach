@@ -229,6 +229,16 @@
       <div class="stats-grid" id="statsGrid"></div>
 
       <div class="section-header" style="margin-top:0.5rem;">
+        <div class="section-title">Charge sur 4 semaines</div>
+        <div style="display:flex;gap:10px;font-size:0.68rem;color:var(--muted);">
+          <span style="color:var(--swim)">● Nat.</span>
+          <span style="color:var(--bike)">● Vélo</span>
+          <span style="color:var(--run)">● Course</span>
+        </div>
+      </div>
+      <div id="loadChart" style="margin-bottom:1.5rem;background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem 0.5rem 0.25rem;"></div>
+
+      <div class="section-header" style="margin-top:0.5rem;">
         <div class="section-title">Dernières activités</div>
       </div>
       <div id="activitiesList"></div>
@@ -405,6 +415,9 @@ function renderDashboard() {
       <div class="stat-sub">${run.length} séance${run.length>1?'s':''}</div>
     </div>`;
 
+  // Load chart
+  renderLoadChart();
+
   // Activities list
   const recent = activities.slice(0, 10);
   const icons = { Swim:'🏊', Ride:'🚴', VirtualRide:'🚴', Run:'🏃', Walk:'🚶', TrailRun:'🏃', MountainBikeRide:'🚴', GravelRide:'🚴', EBikeRide:'🚴', Rowing:'🚣', Kayaking:'🚣', StandUpPaddling:'🚣' };
@@ -448,6 +461,84 @@ function renderDashboard() {
 
   // Init coach
   initCoach();
+}
+
+function renderLoadChart() {
+  const getType = a => a.sport_type || a.type || '';
+  const isSwim = t => t === 'Swim';
+  const isBike = t => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+  const isRun  = t => ['Run','TrailRun'].includes(t);
+
+  // 4 rolling weeks, oldest first
+  const now = new Date();
+  const weeks = Array.from({length: 4}, (_, i) => {
+    const end = new Date(now); end.setDate(now.getDate() - (3 - i) * 7); end.setHours(23,59,59,999);
+    const start = new Date(end); start.setDate(end.getDate() - 6); start.setHours(0,0,0,0);
+    const d = start.getDate(), m = start.getMonth()+1;
+    return { start, end, swim:0, bike:0, run:0, label: i === 3 ? 'Cette sem.' : `${d}/${m<10?'0'+m:m}` };
+  });
+
+  activities.forEach(a => {
+    const d = new Date(a.start_date);
+    const t = getType(a);
+    const mins = (a.moving_time || 0) / 60;
+    weeks.forEach(w => {
+      if (d >= w.start && d <= w.end) {
+        if (isSwim(t)) w.swim += mins;
+        else if (isBike(t)) w.bike += mins;
+        else if (isRun(t)) w.run += mins;
+      }
+    });
+  });
+
+  const maxTotal = Math.max(...weeks.map(w => w.swim + w.bike + w.run), 60);
+
+  // SVG layout
+  const W = 300, H = 120;
+  const padL = 32, padR = 8, padT = 16, padB = 28;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+  const colW = chartW / weeks.length;
+  const barW = colW * 0.52;
+
+  // Y grid lines (3 steps)
+  let svg = '';
+  [0, 1, 2, 3].forEach(i => {
+    const y = padT + chartH - (i / 3) * chartH;
+    const val = Math.round((i / 3) * maxTotal);
+    svg += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+    if (i > 0) svg += `<text x="${(padL - 4).toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="7" fill="#555">${val}min</text>`;
+  });
+
+  // Bars
+  weeks.forEach((w, i) => {
+    const x = padL + colW * i + (colW - barW) / 2;
+    const total = w.swim + w.bike + w.run;
+    let yPos = padT + chartH;
+
+    [{val: w.swim, color: '#00b4d8'}, {val: w.bike, color: '#f77f00'}, {val: w.run, color: '#06d6a0'}].forEach(seg => {
+      if (seg.val <= 0) return;
+      const h = (seg.val / maxTotal) * chartH;
+      yPos -= h;
+      svg += `<rect x="${x.toFixed(1)}" y="${yPos.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${seg.color}" rx="2"/>`;
+    });
+
+    // Total label on top of bar
+    if (total > 0) {
+      const topY = padT + chartH - (total / maxTotal) * chartH - 4;
+      const hrs = Math.floor(total / 60);
+      const mins = Math.round(total % 60);
+      const label = hrs > 0 ? `${hrs}h${mins > 0 ? mins : ''}` : `${Math.round(total)}min`;
+      svg += `<text x="${(x + barW/2).toFixed(1)}" y="${topY.toFixed(1)}" text-anchor="middle" font-size="7.5" fill="rgba(255,255,255,0.55)">${label}</text>`;
+    }
+
+    // Week label
+    const isCurrent = i === weeks.length - 1;
+    svg += `<text x="${(x + barW/2).toFixed(1)}" y="${(H - padB + 14).toFixed(1)}" text-anchor="middle" font-size="8" fill="${isCurrent ? '#c77dff' : '#666'}">${w.label}</text>`;
+  });
+
+  document.getElementById('loadChart').innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">${svg}</svg>`;
 }
 
 function formatPace(mps) {
