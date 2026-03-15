@@ -363,6 +363,9 @@ async function fetchActivities(token) {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     activities = await res.json();
+    if (Array.isArray(activities)) {
+      activities.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+    }
     renderDashboard();
   } catch(e) {
     document.getElementById('dashLoading').innerHTML = '<div class="error-box">Erreur de chargement des activités.</div>';
