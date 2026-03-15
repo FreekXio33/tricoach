@@ -373,9 +373,10 @@ function renderDashboard() {
   weekStart.setHours(0,0,0,0);
 
   const weekActs = activities.filter(a => new Date(a.start_date) >= weekStart);
-  const swim = weekActs.filter(a => a.type === 'Swim');
-  const bike = weekActs.filter(a => a.type === 'Ride' || a.type === 'VirtualRide');
-  const run = weekActs.filter(a => a.type === 'Run');
+  const getType = a => a.sport_type || a.type || '';
+  const swim = weekActs.filter(a => getType(a) === 'Swim');
+  const bike = weekActs.filter(a => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a)));
+  const run = weekActs.filter(a => ['Run','TrailRun'].includes(getType(a)));
 
   const sumDist = arr => arr.reduce((s,a) => s + a.distance, 0);
 
@@ -398,36 +399,31 @@ function renderDashboard() {
 
   // Activities list
   const recent = activities.slice(0, 10);
-  const icons = { Swim:'🏊', Ride:'🚴', VirtualRide:'🚴', Run:'🏃', Walk:'🚶' };
-  const colors = { Swim:'swim-c', Ride:'bike-c', VirtualRide:'bike-c', Run:'run-c' };
-  const typeClass = { Swim:'Swim', Ride:'Ride', VirtualRide:'Ride', Run:'Run' };
+  const icons = { Swim:'🏊', Ride:'🚴', VirtualRide:'🚴', Run:'🏃', Walk:'🚶', TrailRun:'🏃', MountainBikeRide:'🚴', GravelRide:'🚴', EBikeRide:'🚴', Rowing:'🚣', Kayaking:'🚣', StandUpPaddling:'🚣' };
+  const colors = { Swim:'swim-c', Ride:'bike-c', VirtualRide:'bike-c', Run:'run-c', TrailRun:'run-c', MountainBikeRide:'bike-c', GravelRide:'bike-c', EBikeRide:'bike-c' };
+  const typeClass = { Swim:'Swim', Ride:'Ride', VirtualRide:'Ride', Run:'Run', TrailRun:'Run', MountainBikeRide:'Ride', GravelRide:'Ride', EBikeRide:'Ride' };
+
+  const escapeHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   document.getElementById('activitiesList').innerHTML = recent.map(a => {
-    const date = new Date(a.start_date_local);
-    const dateStr = date.toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'});
-    const dist = a.distance > 0 ? (a.distance/1000).toFixed(1) + ' km' : '';
-    // average_speed is in m/s — for Run/Swim we convert to pace, for Bike to km/h
-    let pace = '';
-    if (a.type === 'Run' && a.average_speed > 0) {
-      pace = formatPace(a.average_speed) + '/km';
-    } else if (a.type === 'Swim' && a.average_speed > 0) {
-      // swim pace = seconds per 100m
-      const secPer100m = 100 / a.average_speed;
-      const min = Math.floor(secPer100m / 60);
-      const sec = Math.round(secPer100m % 60);
-      pace = `${min}:${sec.toString().padStart(2,'0')}/100m`;
-    } else if (a.average_speed > 0) {
-      pace = (a.average_speed * 3.6).toFixed(1) + ' km/h';
-    }
+    const sportType = a.sport_type || a.type || '';
+    const date = new Date(a.start_date_local || a.start_date);
+    const dateStr = isNaN(date) ? '' : date.toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'});
+    const dist = a.distance > 0 ? (a.distance/1000).toFixed(1) + 'km' : '';
+    const pace = sportType === 'Run' && a.average_speed > 0
+      ? formatPace(a.average_speed) + '/km'
+      : sportType === 'TrailRun' && a.average_speed > 0
+      ? formatPace(a.average_speed) + '/km'
+      : sportType === 'Swim' && a.average_speed > 0
+      ? formatPace(a.average_speed/10) + '/100m'
+      : a.average_speed > 0 ? (a.average_speed*3.6).toFixed(1) + 'km/h' : '';
     const hr = a.average_heartrate ? ` · ♥ ${Math.round(a.average_heartrate)}bpm` : '';
-    const tc = typeClass[a.type] || 'other';
-    const cc = colors[a.type] || 'accent';
-    // Clean name - keep it simple, just use the name as-is
-    const cleanName = a.name || 'Activité';
+    const tc = typeClass[sportType] || 'other';
+    const cc = colors[sportType] || 'accent';
     return `<div class="activity-item">
-      <div class="act-icon ${tc}">${icons[a.type]||'⚡'}</div>
+      <div class="act-icon ${tc}">${icons[sportType]||'⚡'}</div>
       <div class="act-info">
-        <div class="act-name">${cleanName}</div>
+        <div class="act-name">${escapeHtml(a.name) || 'Activité'}</div>
         <div class="act-meta">${dateStr} · ${Math.round(a.moving_time/60)}min${hr}</div>
       </div>
       <div class="act-stats">
@@ -447,10 +443,9 @@ function renderDashboard() {
 }
 
 function formatPace(mps) {
-  if (!mps || mps <= 0) return '--:--';
-  const secPerKm = 1000 / mps;
-  const min = Math.floor(secPerKm / 60);
-  const sec = Math.round(secPerKm % 60);
+  const spm = 1/mps;
+  const min = Math.floor(spm/60);
+  const sec = Math.round(spm%60);
   return `${min}:${sec.toString().padStart(2,'0')}`;
 }
 
@@ -604,9 +599,10 @@ function renderProfil() {
 // ===== HELPERS =====
 function buildAthleteContext() {
   if (!activities.length) return 'Aucune activité récente.';
-  const swim = activities.filter(a => a.type === 'Swim');
-  const bike = activities.filter(a => ['Ride','VirtualRide'].includes(a.type));
-  const run = activities.filter(a => a.type === 'Run');
+  const getType = a => a.sport_type || a.type || '';
+  const swim = activities.filter(a => getType(a) === 'Swim');
+  const bike = activities.filter(a => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a)));
+  const run = activities.filter(a => ['Run','TrailRun'].includes(getType(a)));
   const swimDist = swim.reduce((s,a)=>s+a.distance,0)/1000;
   const bikeDist = bike.reduce((s,a)=>s+a.distance,0)/1000;
   const runDist = run.reduce((s,a)=>s+a.distance,0)/1000;
