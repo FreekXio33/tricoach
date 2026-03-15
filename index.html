@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriCoach AI — Ton coach triathlon</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #111318;
+    --surface2: #1a1d24;
+    --border: rgba(255,255,255,0.08);
+    --swim: #00b4d8;
+    --bike: #f77f00;
+    --run: #06d6a0;
+    --accent: #c77dff;
+    --text: #f0f0f0;
+    --muted: #888;
+    --danger: #ff4d6d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* HEADER */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+    background: var(--surface); position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-family: 'Bebas Neue', sans-serif; font-size: 1.8rem; letter-spacing: 3px; color: var(--accent); }
+  .logo span { color: var(--run); }
+
+  .user-info { display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--accent); object-fit: cover; }
+  .username { font-size: 0.85rem; font-weight: 500; }
+  .disconnect-btn {
+    font-size: 0.75rem; color: var(--muted); background: none; border: none;
+    cursor: pointer; font-family: 'DM Sans', sans-serif; padding: 4px 8px;
+    border-radius: 6px; transition: background 0.2s;
+  }
+  .disconnect-btn:hover { background: var(--surface2); color: var(--danger); }
+
+  /* TABS */
+  .tabs { display: flex; gap: 2px; padding: 0 1.5rem; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .tab { padding: 0.75rem 1.2rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; color: var(--muted); transition: all 0.2s; background: transparent; border: none; font-family: 'DM Sans', sans-serif; white-space: nowrap; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  /* CONTENT */
+  .page { padding: 1.5rem; display: none; max-width: 600px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* CONNECT SCREEN */
+  .connect-screen {
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 2rem;
+    text-align: center; gap: 1.5rem;
+  }
+  .connect-logo { font-family: 'Bebas Neue', sans-serif; font-size: 3.5rem; letter-spacing: 4px; color: var(--accent); line-height: 1; }
+  .connect-logo span { color: var(--run); }
+  .connect-tagline { font-size: 1rem; color: var(--muted); max-width: 300px; line-height: 1.6; }
+  .features { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+  .feature-pill { background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 0.4rem 0.85rem; font-size: 0.8rem; color: var(--muted); }
+  .strava-connect-btn {
+    display: flex; align-items: center; gap: 12px; background: #fc4c02;
+    color: white; border: none; border-radius: 12px; padding: 0.9rem 2rem;
+    font-size: 1rem; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif;
+    transition: transform 0.15s, opacity 0.15s; text-decoration: none;
+  }
+  .strava-connect-btn:hover { transform: scale(1.03); opacity: 0.92; }
+  .legal { font-size: 0.72rem; color: var(--muted); opacity: 0.7; }
+
+  /* STATS */
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); }
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1.5rem; }
+  .stat-card { background: var(--surface); border-radius: 12px; padding: 0.85rem; border: 1px solid var(--border); position: relative; overflow: hidden; }
+  .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .stat-card.swim::before { background: var(--swim); }
+  .stat-card.bike::before { background: var(--bike); }
+  .stat-card.run::before { background: var(--run); }
+  .stat-label { font-size: 0.7rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .stat-value { font-family: 'Bebas Neue', sans-serif; font-size: 1.7rem; line-height: 1; }
+  .swim-c { color: var(--swim); } .bike-c { color: var(--bike); } .run-c { color: var(--run); }
+  .stat-sub { font-size: 0.68rem; color: var(--muted); margin-top: 4px; }
+
+  /* ACTIVITY LIST */
+  .activity-item { display: flex; align-items: center; gap: 12px; padding: 0.85rem; background: var(--surface); border-radius: 10px; margin-bottom: 8px; border: 1px solid var(--border); cursor: pointer; transition: border-color 0.2s; }
+  .activity-item:hover { border-color: rgba(255,255,255,0.18); }
+  .act-icon { width: 38px; height: 38px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+  .act-icon.Swim { background: rgba(0,180,216,0.15); }
+  .act-icon.Ride { background: rgba(247,127,0,0.15); }
+  .act-icon.Run { background: rgba(6,214,160,0.15); }
+  .act-icon.other { background: rgba(199,125,255,0.15); }
+  .act-info { flex: 1; min-width: 0; }
+  .act-name { font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .act-meta { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+  .act-stats { text-align: right; flex-shrink: 0; }
+  .act-dist { font-family: 'Bebas Neue', sans-serif; font-size: 1.15rem; }
+  .act-pace { font-size: 0.68rem; color: var(--muted); }
+
+  /* PROGRAMME */
+  .week-plan { display: grid; gap: 8px; }
+  .day-card { background: var(--surface); border-radius: 10px; padding: 0.85rem 1rem; border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .day-card.rest { opacity: 0.5; }
+  .day-label { font-family: 'Bebas Neue', sans-serif; font-size: 1rem; width: 32px; color: var(--muted); flex-shrink: 0; }
+  .day-stripe { width: 4px; height: 38px; border-radius: 2px; flex-shrink: 0; }
+  .day-stripe.swim { background: var(--swim); }
+  .day-stripe.bike { background: var(--bike); }
+  .day-stripe.run { background: var(--run); }
+  .day-stripe.rest { background: var(--border); }
+  .day-stripe.brick { background: linear-gradient(var(--bike) 50%, var(--run) 50%); }
+  .day-info { flex: 1; }
+  .day-title { font-size: 0.88rem; font-weight: 500; }
+  .day-desc { font-size: 0.75rem; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+  .day-duration { font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; color: var(--accent); flex-shrink: 0; }
+
+  /* COACH */
+  .chat-wrap { display: flex; flex-direction: column; gap: 10px; margin-bottom: 1rem; }
+  .msg-coach { background: var(--surface); border-radius: 0 12px 12px 12px; padding: 0.85rem 1rem; font-size: 0.85rem; line-height: 1.6; border: 1px solid var(--border); }
+  .msg-coach-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .coach-dot { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0; }
+  .coach-lbl { font-size: 0.78rem; font-weight: 500; color: var(--accent); }
+  .msg-user { background: var(--surface2); border-radius: 12px 0 12px 12px; padding: 0.75rem 1rem; font-size: 0.85rem; line-height: 1.6; align-self: flex-end; max-width: 85%; border: 1px solid var(--border); }
+  .input-row { display: flex; gap: 8px; position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0 0; }
+  .coach-input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.88rem; color: var(--text); font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s; }
+  .coach-input:focus { border-color: var(--accent); }
+  .send-btn { background: var(--accent); color: white; border: none; border-radius: 10px; padding: 0 1.1rem; font-size: 0.9rem; cursor: pointer; font-weight: 600; font-family: 'DM Sans', sans-serif; transition: opacity 0.2s; }
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* LOADING */
+  .dots span { animation: blink 1.2s infinite; display: inline-block; }
+  .dots span:nth-child(2) { animation-delay: 0.2s; }
+  .dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
+
+  /* SPINNER */
+  .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 2rem auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* GOAL BANNER */
+  .goal-banner { background: var(--surface2); border-radius: 12px; padding: 1rem; border: 1px solid var(--border); margin-bottom: 1.5rem; display: flex; align-items: center; gap: 12px; }
+  .goal-icon { font-size: 1.6rem; }
+  .goal-title { font-size: 0.78rem; color: var(--muted); margin-bottom: 2px; }
+  .goal-name { font-size: 0.92rem; font-weight: 500; }
+  .goal-days { font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; color: var(--accent); margin-left: auto; }
+  .goal-days-lbl { font-size: 0.68rem; color: var(--muted); text-align: center; }
+
+  /* BADGE */
+  .badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 20px; font-size: 0.68rem; font-weight: 600; margin-left: 6px; }
+  .badge.new { background: rgba(199,125,255,0.15); color: var(--accent); }
+
+  /* ERROR */
+  .error-box { background: rgba(255,77,109,0.1); border: 1px solid rgba(255,77,109,0.3); border-radius: 10px; padding: 1rem; font-size: 0.85rem; color: #ff8fa3; margin-bottom: 1rem; }
+
+  /* PROFIL */
+  .profile-card { background: var(--surface); border-radius: 14px; padding: 1.5rem; border: 1px solid var(--border); margin-bottom: 1rem; text-align: center; }
+  .profile-avatar { width: 72px; height: 72px; border-radius: 50%; border: 3px solid var(--accent); object-fit: cover; margin: 0 auto 0.75rem; display: block; }
+  .profile-name { font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem; letter-spacing: 1px; }
+  .profile-location { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+  .profile-stats { display: flex; gap: 1rem; justify-content: center; margin-top: 1rem; }
+  .profile-stat { text-align: center; }
+  .profile-stat-val { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; color: var(--accent); }
+  .profile-stat-lbl { font-size: 0.7rem; color: var(--muted); }
+
+  @media (max-width: 400px) {
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .stat-card.run { grid-column: span 2; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== CONNECT SCREEN ===== -->
+<div id="connectScreen" class="connect-screen">
+  <div class="connect-logo">Tri<span>Coach</span><br>AI</div>
+  <div class="connect-tagline">Ton coach triathlon personnalisé, alimenté par tes données Strava et l'IA.</div>
+  <div class="features">
+    <div class="feature-pill">🏊 Natation</div>
+    <div class="feature-pill">🚴 Vélo</div>
+    <div class="feature-pill">🏃 Course</div>
+    <div class="feature-pill">🤖 Coach IA</div>
+    <div class="feature-pill">📅 Programme</div>
+  </div>
+  <a id="stravaAuthLink" class="strava-connect-btn" href="#">
+    <svg style="width:22px;height:22px;fill:white;flex-shrink:0;" viewBox="0 0 24 24"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+    Se connecter avec Strava
+  </a>
+  <div class="legal">Lecture seule · Aucune donnée vendue · Conforme RGPD</div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
+<div id="mainApp" style="display:none;">
+  <div class="header">
+    <div class="logo">Tri<span>Coach</span> AI</div>
+    <div class="user-info">
+      <img id="headerAvatar" class="avatar" src="" alt="avatar">
+      <span id="headerName" class="username"></span>
+      <button class="disconnect-btn" onclick="disconnect()">Déconnexion</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('dashboard',this)">📊 Tableau de bord</button>
+    <button class="tab" onclick="switchTab('programme',this)">📅 Programme</button>
+    <button class="tab" onclick="switchTab('coach',this)">🤖 Coach IA</button>
+    <button class="tab" onclick="switchTab('profil',this)">👤 Profil</button>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="tab-dashboard" class="page active">
+    <div id="dashLoading" class="spinner"></div>
+    <div id="dashContent" style="display:none;">
+      <div class="goal-banner">
+        <div class="goal-icon">🏆</div>
+        <div>
+          <div class="goal-title">Objectif</div>
+          <div class="goal-name">Triathlon 70.3 — Juin 2026</div>
+        </div>
+        <div style="text-align:center;margin-left:auto;">
+          <div class="goal-days" id="daysLeft">-</div>
+          <div class="goal-days-lbl">jours</div>
+        </div>
+      </div>
+
+      <div class="section-header"><div class="section-title">Charge cette semaine</div></div>
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <div class="section-header" style="margin-top:0.5rem;">
+        <div class="section-title">Dernières activités</div>
+      </div>
+      <div id="activitiesList"></div>
+    </div>
+  </div>
+
+  <!-- PROGRAMME -->
+  <div id="tab-programme" class="page">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Programme S<span id="weekNum">-</span></div>
+        <div style="font-size:0.78rem;color:var(--muted);">Généré par IA · basé sur tes activités réelles</div>
+      </div>
+      <button id="regenBtn" onclick="generatePlan()" style="background:var(--surface2);color:var(--accent);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.85rem;font-size:0.8rem;cursor:pointer;font-family:'DM Sans',sans-serif;">↻ Régénérer</button>
+    </div>
+    <div id="planLoading" class="spinner" style="display:none;"></div>
+    <div id="weekPlan" class="week-plan"></div>
+    <div id="coachNote" style="margin-top:1rem;padding:0.85rem;background:var(--surface2);border-radius:10px;border:1px solid var(--border);font-size:0.82rem;color:var(--muted);line-height:1.6;display:none;"></div>
+  </div>
+
+  <!-- COACH -->
+  <div id="tab-coach" class="page">
+    <div style="margin-bottom:1rem;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Coach IA</div>
+      <div style="font-size:0.78rem;color:var(--muted);">Nutrition, récupération, technique, objectifs...</div>
+    </div>
+    <div class="chat-wrap" id="chatMessages"></div>
+    <div class="input-row">
+      <input class="coach-input" id="coachInput" placeholder="Pose ta question au coach..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}">
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">→</button>
+    </div>
+  </div>
+
+  <!-- PROFIL -->
+  <div id="tab-profil" class="page">
+    <div id="profilContent"></div>
+  </div>
+</div>
+
+<script>
+// ===== CONFIG =====
+const CLIENT_ID = '212070';
+const CLIENT_SECRET = '5b4da95861b3d717348847f7de353fd3f16c1a03';
+const REDIRECT_URI = window.location.origin + window.location.pathname;
+const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+
+// ===== STATE =====
+let athlete = null;
+let activities = [];
+let chatHistory = [];
+
+// ===== INIT =====
+window.addEventListener('load', async () => {
+  // Build Strava OAuth URL
+  const authUrl = `https://www.strava.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=read,activity:read_all`;
+  document.getElementById('stravaAuthLink').href = authUrl;
+
+  // Check for OAuth callback
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+
+  if (code) {
+    history.replaceState({}, '', window.location.pathname);
+    await exchangeToken(code);
+  } else {
+    const saved = localStorage.getItem('strava_token');
+    if (saved) {
+      const token = JSON.parse(saved);
+      if (token.expires_at * 1000 < Date.now()) {
+        await refreshToken(token.refresh_token);
+      } else {
+        await loadApp(token);
+      }
+    }
+  }
+});
+
+async function exchangeToken(code) {
+  try {
+    const res = await fetch('https://www.strava.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, code, grant_type: 'authorization_code' })
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      localStorage.setItem('strava_token', JSON.stringify(data));
+      await loadApp(data);
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function refreshToken(refresh_token) {
+  const res = await fetch('https://www.strava.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, refresh_token, grant_type: 'refresh_token' })
+  });
+  const data = await res.json();
+  if (data.access_token) {
+    localStorage.setItem('strava_token', JSON.stringify(data));
+    await loadApp(data);
+  }
+}
+
+async function loadApp(token) {
+  document.getElementById('connectScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+
+  athlete = token.athlete;
+  document.getElementById('headerAvatar').src = athlete.profile_medium || athlete.profile;
+  document.getElementById('headerName').textContent = athlete.firstname;
+
+  // Days to goal
+  const goalDate = new Date('2026-06-14');
+  const days = Math.ceil((goalDate - new Date()) / 86400000);
+  document.getElementById('daysLeft').textContent = days;
+
+  await fetchActivities(token.access_token);
+}
+
+async function fetchActivities(token) {
+  try {
+    // Get activities from last 4 weeks
+    const since = Math.floor(Date.now()/1000) - 28*86400;
+    const res = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=30`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    activities = await res.json();
+    renderDashboard();
+  } catch(e) {
+    document.getElementById('dashLoading').innerHTML = '<div class="error-box">Erreur de chargement des activités.</div>';
+  }
+}
+
+function renderDashboard() {
+  document.getElementById('dashLoading').style.display = 'none';
+  document.getElementById('dashContent').style.display = 'block';
+
+  // Week stats
+  const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  weekStart.setHours(0,0,0,0);
+
+  const weekActs = activities.filter(a => new Date(a.start_date) >= weekStart);
+  const swim = weekActs.filter(a => a.type === 'Swim');
+  const bike = weekActs.filter(a => a.type === 'Ride' || a.type === 'VirtualRide');
+  const run = weekActs.filter(a => a.type === 'Run');
+
+  const sumDist = arr => arr.reduce((s,a) => s + a.distance, 0);
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card swim">
+      <div class="stat-label">Natation</div>
+      <div class="stat-value swim-c">${(sumDist(swim)/1000).toFixed(1)}<span style="font-size:0.9rem">km</span></div>
+      <div class="stat-sub">${swim.length} séance${swim.length>1?'s':''}</div>
+    </div>
+    <div class="stat-card bike">
+      <div class="stat-label">Vélo</div>
+      <div class="stat-value bike-c">${Math.round(sumDist(bike)/1000)}<span style="font-size:0.9rem">km</span></div>
+      <div class="stat-sub">${bike.length} séance${bike.length>1?'s':''}</div>
+    </div>
+    <div class="stat-card run">
+      <div class="stat-label">Course</div>
+      <div class="stat-value run-c">${(sumDist(run)/1000).toFixed(1)}<span style="font-size:0.9rem">km</span></div>
+      <div class="stat-sub">${run.length} séance${run.length>1?'s':''}</div>
+    </div>`;
+
+  // Activities list
+  const recent = activities.slice(0, 10);
+  const icons = { Swim:'🏊', Ride:'🚴', VirtualRide:'🚴', Run:'🏃', Walk:'🚶' };
+  const colors = { Swim:'swim-c', Ride:'bike-c', VirtualRide:'bike-c', Run:'run-c' };
+  const typeClass = { Swim:'Swim', Ride:'Ride', VirtualRide:'Ride', Run:'Run' };
+
+  document.getElementById('activitiesList').innerHTML = recent.map(a => {
+    const date = new Date(a.start_date_local);
+    const dateStr = date.toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'});
+    const dist = a.distance > 0 ? (a.distance/1000).toFixed(1) + ' km' : '';
+    // average_speed is in m/s — for Run/Swim we convert to pace, for Bike to km/h
+    let pace = '';
+    if (a.type === 'Run' && a.average_speed > 0) {
+      pace = formatPace(a.average_speed) + '/km';
+    } else if (a.type === 'Swim' && a.average_speed > 0) {
+      // swim pace = seconds per 100m
+      const secPer100m = 100 / a.average_speed;
+      const min = Math.floor(secPer100m / 60);
+      const sec = Math.round(secPer100m % 60);
+      pace = `${min}:${sec.toString().padStart(2,'0')}/100m`;
+    } else if (a.average_speed > 0) {
+      pace = (a.average_speed * 3.6).toFixed(1) + ' km/h';
+    }
+    const hr = a.average_heartrate ? ` · ♥ ${Math.round(a.average_heartrate)}bpm` : '';
+    const tc = typeClass[a.type] || 'other';
+    const cc = colors[a.type] || 'accent';
+    // Clean name - keep it simple, just use the name as-is
+    const cleanName = a.name || 'Activité';
+    return `<div class="activity-item">
+      <div class="act-icon ${tc}">${icons[a.type]||'⚡'}</div>
+      <div class="act-info">
+        <div class="act-name">${cleanName}</div>
+        <div class="act-meta">${dateStr} · ${Math.round(a.moving_time/60)}min${hr}</div>
+      </div>
+      <div class="act-stats">
+        <div class="act-dist ${cc}">${dist}</div>
+        <div class="act-pace">${pace}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Week number
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  document.getElementById('weekNum').textContent = Math.ceil(((now - start) / 86400000 + start.getDay() + 1) / 7);
+
+  // Init coach
+  initCoach();
+}
+
+function formatPace(mps) {
+  if (!mps || mps <= 0) return '--:--';
+  const secPerKm = 1000 / mps;
+  const min = Math.floor(secPerKm / 60);
+  const sec = Math.round(secPerKm % 60);
+  return `${min}:${sec.toString().padStart(2,'0')}`;
+}
+
+// ===== PLAN =====
+async function generatePlan() {
+  document.getElementById('planLoading').style.display = 'block';
+  document.getElementById('weekPlan').innerHTML = '';
+  document.getElementById('coachNote').style.display = 'none';
+  document.getElementById('regenBtn').disabled = true;
+
+  const summary = buildAthleteContext();
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 1000,
+        system: `Tu es un coach triathlon expert. Génère un programme d'entraînement hebdomadaire pour un triathlète visant un 70.3.
+Réponds UNIQUEMENT en JSON valide, sans markdown, avec ce format exact:
+{
+  "note": "Note du coach (2 phrases max)",
+  "days": [
+    {"day":"LUN","type":"swim|bike|run|brick|rest","title":"Titre","desc":"Description courte","duration":"Xhmin"}
+  ]
+}
+Types valides: swim, bike, run, brick, rest. 7 jours obligatoires.`,
+        messages: [{ role: 'user', content: `Génère le programme pour cet athlète: ${summary}` }]
+      })
+    });
+    const data = await res.json();
+    const text = data.content[0].text;
+    const plan = JSON.parse(text);
+
+    document.getElementById('planLoading').style.display = 'none';
+    document.getElementById('regenBtn').disabled = false;
+
+    document.getElementById('weekPlan').innerHTML = plan.days.map(d => `
+      <div class="day-card ${d.type==='rest'?'rest':''}">
+        <div class="day-label">${d.day}</div>
+        <div class="day-stripe ${d.type}"></div>
+        <div class="day-info">
+          <div class="day-title">${d.title}</div>
+          <div class="day-desc">${d.desc}</div>
+        </div>
+        ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
+      </div>`).join('');
+
+    const noteEl = document.getElementById('coachNote');
+    noteEl.innerHTML = `<span style="color:var(--accent);font-weight:500;">🤖 Coach</span><br>${plan.note}`;
+    noteEl.style.display = 'block';
+  } catch(e) {
+    document.getElementById('planLoading').style.display = 'none';
+    document.getElementById('regenBtn').disabled = false;
+    document.getElementById('weekPlan').innerHTML = '<div class="error-box">Erreur de génération. Vérifie ta connexion.</div>';
+  }
+}
+
+// ===== COACH CHAT =====
+function initCoach() {
+  const ctx = buildAthleteContext();
+  const welcome = `Bonjour ${athlete.firstname} ! 👋\n\nJ'ai analysé tes activités récentes sur Strava.\n${ctx}\n\nQue puis-je faire pour toi ? Nutrition, récupération, technique, objectifs de course...`;
+  addCoachMessage(welcome);
+}
+
+function addCoachMessage(text) {
+  const wrap = document.getElementById('chatMessages');
+  wrap.innerHTML += `<div class="msg-coach">
+    <div class="msg-coach-header"><div class="coach-dot">🤖</div><div class="coach-lbl">Coach IA</div></div>
+    <div>${text.replace(/\n/g,'<br>')}</div>
+  </div>`;
+  wrap.scrollTop = wrap.scrollHeight;
+  chatHistory.push({ role: 'assistant', content: text });
+}
+
+async function sendMessage() {
+  const input = document.getElementById('coachInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  document.getElementById('sendBtn').disabled = true;
+
+  const wrap = document.getElementById('chatMessages');
+  wrap.innerHTML += `<div class="msg-user">${msg}</div>`;
+  chatHistory.push({ role: 'user', content: msg });
+
+  const loadId = 'load-' + Date.now();
+  wrap.innerHTML += `<div class="msg-coach" id="${loadId}">
+    <div class="msg-coach-header"><div class="coach-dot">🤖</div><div class="coach-lbl">Coach IA</div></div>
+    <div class="dots"><span>●</span><span>●</span><span>●</span></div>
+  </div>`;
+  wrap.scrollTop = wrap.scrollHeight;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 400,
+        system: `Tu es un coach triathlon expert et bienveillant. Athlète: ${buildAthleteContext()}. Objectif: 70.3 juin 2026. Réponds en français, de façon concise (3-5 phrases max), pratique et motivante.`,
+        messages: chatHistory.slice(-8)
+      })
+    });
+    const data = await res.json();
+    const reply = data.content[0].text;
+    document.getElementById(loadId).querySelector('.dots').innerHTML = reply.replace(/\n/g,'<br>');
+    chatHistory.push({ role: 'assistant', content: reply });
+  } catch(e) {
+    document.getElementById(loadId).querySelector('.dots').textContent = 'Erreur de connexion au coach IA.';
+  }
+  document.getElementById('sendBtn').disabled = false;
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+// ===== PROFIL =====
+function renderProfil() {
+  const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  const ytdActs = activities;
+  const totalDist = ytdActs.reduce((s,a) => s + a.distance, 0);
+  const totalTime = ytdActs.reduce((s,a) => s + a.moving_time, 0);
+
+  document.getElementById('profilContent').innerHTML = `
+    <div class="profile-card">
+      <img class="profile-avatar" src="${athlete.profile}" alt="avatar">
+      <div class="profile-name">${athlete.firstname} ${athlete.lastname}</div>
+      <div class="profile-location">${athlete.city || ''}${athlete.country ? ', '+athlete.country : ''}</div>
+      <div class="profile-stats">
+        <div class="profile-stat">
+          <div class="profile-stat-val">${ytdActs.length}</div>
+          <div class="profile-stat-lbl">Activités (4 sem.)</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val">${Math.round(totalDist/1000)}km</div>
+          <div class="profile-stat-lbl">Distance totale</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-val">${Math.round(totalTime/3600)}h</div>
+          <div class="profile-stat-lbl">Temps d'effort</div>
+        </div>
+      </div>
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">OBJECTIF PRINCIPAL</div>
+      <div style="font-size:0.95rem;font-weight:500;">🏆 Triathlon 70.3</div>
+      <div style="font-size:0.8rem;color:var(--muted);margin-top:4px;">Juin 2026 · Entraînement en cours</div>
+    </div>`;
+}
+
+// ===== HELPERS =====
+function buildAthleteContext() {
+  if (!activities.length) return 'Aucune activité récente.';
+  const swim = activities.filter(a => a.type === 'Swim');
+  const bike = activities.filter(a => ['Ride','VirtualRide'].includes(a.type));
+  const run = activities.filter(a => a.type === 'Run');
+  const swimDist = swim.reduce((s,a)=>s+a.distance,0)/1000;
+  const bikeDist = bike.reduce((s,a)=>s+a.distance,0)/1000;
+  const runDist = run.reduce((s,a)=>s+a.distance,0)/1000;
+  const avgSwimPace = swim.length ? swim.reduce((s,a)=>s+(a.average_speed||0),0)/swim.length : 0;
+  const avgRunPace = run.length ? run.reduce((s,a)=>s+(a.average_speed||0),0)/run.length : 0;
+  return `Sur 4 semaines: Natation ${swimDist.toFixed(1)}km (${swim.length} séances${avgSwimPace?' · allure '+formatPace(avgSwimPace/10)+'/100m':''}), Vélo ${bikeDist.toFixed(0)}km (${bike.length} séances), Course ${runDist.toFixed(1)}km (${run.length} séances${avgRunPace?' · allure '+formatPace(avgRunPace)+'/km':''}).`;
+}
+
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'programme' && !document.getElementById('weekPlan').innerHTML) generatePlan();
+  if (name === 'profil') renderProfil();
+}
+
+function disconnect() {
+  localStorage.removeItem('strava_token');
+  location.reload();
+}
+</script>
+</body>
+</html>
