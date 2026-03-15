@@ -420,7 +420,7 @@ function renderDashboard() {
       : sportType === 'TrailRun' && a.average_speed > 0
       ? formatPace(a.average_speed) + '/km'
       : sportType === 'Swim' && a.average_speed > 0
-      ? formatPace(a.average_speed/10) + '/100m'
+      ? formatPace(a.average_speed * 10) + '/100m'
       : a.average_speed > 0 ? (a.average_speed*3.6).toFixed(1) + 'km/h' : '';
     const hr = a.average_heartrate ? ` · ♥ ${Math.round(a.average_heartrate)}bpm` : '';
     const tc = typeClass[sportType] || 'other';
@@ -448,7 +448,7 @@ function renderDashboard() {
 }
 
 function formatPace(mps) {
-  const spm = 1/mps;
+  const spm = 1000/mps;
   const min = Math.floor(spm/60);
   const sec = Math.round(spm%60);
   return `${min}:${sec.toString().padStart(2,'0')}`;
@@ -613,7 +613,7 @@ function buildAthleteContext() {
   const runDist = run.reduce((s,a)=>s+a.distance,0)/1000;
   const avgSwimPace = swim.length ? swim.reduce((s,a)=>s+(a.average_speed||0),0)/swim.length : 0;
   const avgRunPace = run.length ? run.reduce((s,a)=>s+(a.average_speed||0),0)/run.length : 0;
-  return `Sur 4 semaines: Natation ${swimDist.toFixed(1)}km (${swim.length} séances${avgSwimPace?' · allure '+formatPace(avgSwimPace/10)+'/100m':''}), Vélo ${bikeDist.toFixed(0)}km (${bike.length} séances), Course ${runDist.toFixed(1)}km (${run.length} séances${avgRunPace?' · allure '+formatPace(avgRunPace)+'/km':''}).`;
+  return `Sur 4 semaines: Natation ${swimDist.toFixed(1)}km (${swim.length} séances${avgSwimPace?' · allure '+formatPace(avgSwimPace*10)+'/100m':''}), Vélo ${bikeDist.toFixed(0)}km (${bike.length} séances), Course ${runDist.toFixed(1)}km (${run.length} séances${avgRunPace?' · allure '+formatPace(avgRunPace)+'/km':''}).`;
 }
 
 function switchTab(name, el) {
