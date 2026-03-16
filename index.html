@@ -205,7 +205,7 @@
   <div class="tabs">
     <button class="tab active" onclick="switchTab('dashboard',this)">📊 Tableau de bord</button>
     <button class="tab" onclick="switchTab('programme',this)">📅 Programme</button>
-    <button class="tab" onclick="switchTab('coach',this)">🤖 Coach IA</button>
+    <button class="tab" onclick="switchTab('coach',this)">💡 Conseils</button>
     <button class="tab" onclick="switchTab('profil',this)">👤 Profil</button>
   </div>
 
@@ -262,14 +262,10 @@
   <!-- COACH -->
   <div id="tab-coach" class="page">
     <div style="margin-bottom:1rem;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Coach IA</div>
-      <div style="font-size:0.78rem;color:var(--muted);">Nutrition, récupération, technique, objectifs...</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Conseils</div>
+      <div style="font-size:0.78rem;color:var(--muted);">Analyse automatique de tes données Strava</div>
     </div>
-    <div class="chat-wrap" id="chatMessages"></div>
-    <div class="input-row">
-      <input class="coach-input" id="coachInput" placeholder="Pose ta question au coach..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}">
-      <button class="send-btn" id="sendBtn" onclick="sendMessage()">→</button>
-    </div>
+    <div id="coachAdvice"></div>
   </div>
 
   <!-- PROFIL -->
@@ -283,12 +279,9 @@
 const CLIENT_ID = '212070';
 const CLIENT_SECRET = '5b4da95861b3d717348847f7de353fd3f16c1a03';
 const REDIRECT_URI = window.location.origin + window.location.pathname;
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
-
 // ===== STATE =====
 let athlete = null;
 let activities = [];
-let chatHistory = [];
 
 // ===== INIT =====
 window.addEventListener('load', async () => {
@@ -459,8 +452,6 @@ function renderDashboard() {
   const start = new Date(now.getFullYear(), 0, 1);
   document.getElementById('weekNum').textContent = Math.ceil(((now - start) / 86400000 + start.getDay() + 1) / 7);
 
-  // Init coach
-  initCoach();
 }
 
 function renderLoadChart() {
@@ -549,116 +540,223 @@ function formatPace(mps) {
 }
 
 // ===== PLAN =====
-async function generatePlan() {
+function generatePlan() {
   document.getElementById('planLoading').style.display = 'block';
   document.getElementById('weekPlan').innerHTML = '';
   document.getElementById('coachNote').style.display = 'none';
   document.getElementById('regenBtn').disabled = true;
 
-  const summary = buildAthleteContext();
+  setTimeout(() => {
+    try {
+      const analysis = analyzeAthleteData();
+      const plan = buildTrainingWeek(analysis);
 
-  try {
-    const res = await fetch('/api/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 1000,
-        system: `Tu es un coach triathlon expert. Génère un programme d'entraînement hebdomadaire pour un triathlète visant un 70.3.
-Réponds UNIQUEMENT en JSON valide, sans markdown, avec ce format exact:
-{
-  "note": "Note du coach (2 phrases max)",
-  "days": [
-    {"day":"LUN","type":"swim|bike|run|brick|rest","title":"Titre","desc":"Description courte","duration":"Xhmin"}
-  ]
+      document.getElementById('planLoading').style.display = 'none';
+      document.getElementById('regenBtn').disabled = false;
+
+      document.getElementById('weekPlan').innerHTML = plan.days.map(d => `
+        <div class="day-card ${d.type === 'rest' ? 'rest' : ''}">
+          <div class="day-label">${d.day}</div>
+          <div class="day-stripe ${d.type}"></div>
+          <div class="day-info">
+            <div class="day-title">${d.title}</div>
+            <div class="day-desc">${d.desc}</div>
+          </div>
+          ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
+        </div>`).join('');
+
+      const noteEl = document.getElementById('coachNote');
+      noteEl.innerHTML = `<span style="color:var(--accent);font-weight:500;">📊 Analyse</span><br>${plan.note}`;
+      noteEl.style.display = 'block';
+    } catch(e) {
+      document.getElementById('planLoading').style.display = 'none';
+      document.getElementById('regenBtn').disabled = false;
+      document.getElementById('weekPlan').innerHTML = '<div class="error-box">Erreur de génération du programme.</div>';
+    }
+  }, 300);
 }
-Types valides: swim, bike, run, brick, rest. 7 jours obligatoires.`,
-        messages: [{ role: 'user', content: `Génère le programme pour cet athlète: ${summary}` }]
-      })
-    });
-    const data = await res.json();
-    const text = data.content[0].text;
-    const plan = JSON.parse(text);
 
-    document.getElementById('planLoading').style.display = 'none';
-    document.getElementById('regenBtn').disabled = false;
+function analyzeAthleteData() {
+  const getType = a => a.sport_type || a.type || '';
+  const isSwim = t => t === 'Swim';
+  const isBike = t => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+  const isRun  = t => ['Run','TrailRun'].includes(t);
 
-    document.getElementById('weekPlan').innerHTML = plan.days.map(d => `
-      <div class="day-card ${d.type==='rest'?'rest':''}">
-        <div class="day-label">${d.day}</div>
-        <div class="day-stripe ${d.type}"></div>
-        <div class="day-info">
-          <div class="day-title">${d.title}</div>
-          <div class="day-desc">${d.desc}</div>
-        </div>
-        ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
-      </div>`).join('');
+  const now = new Date();
+  const swimActs = activities.filter(a => isSwim(getType(a)));
+  const bikeActs = activities.filter(a => isBike(getType(a)));
+  const runActs  = activities.filter(a => isRun(getType(a)));
 
-    const noteEl = document.getElementById('coachNote');
-    noteEl.innerHTML = `<span style="color:var(--accent);font-weight:500;">🤖 Coach</span><br>${plan.note}`;
-    noteEl.style.display = 'block';
-  } catch(e) {
-    document.getElementById('planLoading').style.display = 'none';
-    document.getElementById('regenBtn').disabled = false;
-    document.getElementById('weekPlan').innerHTML = '<div class="error-box">Erreur de génération. Vérifie ta connexion.</div>';
+  // 4-week average weekly volumes
+  const avgSwimKm  = swimActs.reduce((s,a) => s + a.distance, 0) / 4000;
+  const avgBikeKm  = bikeActs.reduce((s,a) => s + a.distance, 0) / 4000;
+  const avgRunKm   = runActs.reduce((s,a)  => s + a.distance, 0) / 4000;
+  const avgSwimMin = swimActs.reduce((s,a) => s + a.moving_time, 0) / 4 / 60;
+  const avgBikeMin = bikeActs.reduce((s,a) => s + a.moving_time, 0) / 4 / 60;
+  const avgRunMin  = runActs.reduce((s,a)  => s + a.moving_time, 0) / 4 / 60;
+
+  // Average speeds (m/s)
+  const avgSpd = arr => arr.length ? arr.reduce((s,a) => s + (a.average_speed||0), 0) / arr.length : 0;
+  const avgSwimSpeed = avgSpd(swimActs);
+  const avgBikeSpeed = avgSpd(bikeActs);
+  const avgRunSpeed  = avgSpd(runActs);
+
+  // Average heart rate per discipline
+  const hrAvg = arr => { const w = arr.filter(a => a.average_heartrate); return w.length ? Math.round(w.reduce((s,a) => s + a.average_heartrate, 0) / w.length) : 0; };
+  const swimHR = hrAvg(swimActs), bikeHR = hrAvg(bikeActs), runHR = hrAvg(runActs);
+
+  // Training days histogram (0=Sun … 6=Sat)
+  const dayCount = [0,0,0,0,0,0,0];
+  activities.forEach(a => dayCount[new Date(a.start_date_local || a.start_date).getDay()]++);
+
+  // Fitness levels (0=débutant, 1=intermédiaire, 2=avancé)
+  const swimPace100  = avgSwimSpeed > 0 ? 100 / avgSwimSpeed : 999;
+  const bikeSpeedKmh = avgBikeSpeed * 3.6;
+  const runPaceSecKm = avgRunSpeed  > 0 ? 1000 / avgRunSpeed : 999;
+  const swimLevel = swimPace100 < 95 ? 2 : swimPace100 < 120 ? 1 : 0;
+  const bikeLevel = bikeSpeedKmh > 32 ? 2 : bikeSpeedKmh > 25 ? 1 : 0;
+  const runLevel  = runPaceSecKm < 270 ? 2 : runPaceSecKm < 330 ? 1 : 0;
+
+  const totalAvgMin = avgSwimMin + avgBikeMin + avgRunMin;
+  const phase = totalAvgMin < 300 ? 'base' : totalAvgMin < 480 ? 'build' : 'peak';
+
+  // This week volume (Mon–today)
+  const wkStart = new Date(now);
+  wkStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  wkStart.setHours(0,0,0,0);
+  const thisWeekMin = activities.filter(a => new Date(a.start_date) >= wkStart).reduce((s,a) => s + a.moving_time/60, 0);
+
+  const daysSinceLast = activities.length ? Math.floor((now - new Date(activities[0].start_date)) / 86400000) : 99;
+
+  return { swimActs, bikeActs, runActs, avgSwimKm, avgBikeKm, avgRunKm, avgSwimMin, avgBikeMin, avgRunMin, avgSwimSpeed, avgBikeSpeed, avgRunSpeed, swimPace100, bikeSpeedKmh, runPaceSecKm, swimLevel, bikeLevel, runLevel, swimHR, bikeHR, runHR, dayCount, totalAvgMin, phase, thisWeekMin, daysSinceLast };
+}
+
+function buildTrainingWeek(a) {
+  const DAY = ['LUN','MAR','MER','JEU','VEN','SAM','DIM'];
+
+  // Per-session volume (scaled +5% for progressive overload)
+  const nSwim = Math.max(a.swimActs.length / 4, 0.5);
+  const nBike = Math.max(a.bikeActs.length / 4, 0.5);
+  const nRun  = Math.max(a.runActs.length  / 4, 0.5);
+  const sSwimMin = Math.round(Math.max(30, a.avgSwimMin / nSwim * 1.05));
+  const sBikeMin = Math.round(Math.max(45, a.avgBikeMin / nBike * 1.05));
+  const sRunMin  = Math.round(Math.max(30, a.avgRunMin  / nRun  * 1.05));
+  const sSwimKm  = a.avgSwimKm > 0 ? (a.avgSwimKm / nSwim * 1.05).toFixed(1) : '1.5';
+  const sBikeKm  = a.avgBikeKm > 0 ? Math.round(a.avgBikeKm / nBike * 1.05) : 40;
+  const sRunKm   = a.avgRunKm  > 0 ? (a.avgRunKm  / nRun  * 1.05).toFixed(1) : '8';
+  const lBikeKm  = a.avgBikeKm > 0 ? Math.round(Math.max(50, a.avgBikeKm * 1.2)) : 60;
+  const lRunKm   = a.avgRunKm  > 0 ? +(Math.max(10, a.avgRunKm * 1.2)).toFixed(1) : 12;
+
+  // Human-readable paces/speeds
+  const rp = a.avgRunSpeed  > 0 ? formatPace(a.avgRunSpeed) + '/km' : null;
+  const sp = a.avgSwimSpeed > 0 ? formatPace(a.avgSwimSpeed * 10) + '/100m' : null;
+  const bp = a.avgBikeSpeed > 0 ? (a.avgBikeSpeed * 3.6).toFixed(0) + 'km/h' : null;
+  const lBikeDur = bp ? Math.round(lBikeKm / +(bp.replace('km/h','')) * 60) : sBikeMin + 30;
+  const lRunDur  = a.avgRunSpeed > 0 ? Math.round(lRunKm * 1000 / a.avgRunSpeed / 60) : sRunMin + 20;
+
+  const W = {
+    swim_tech:  { type:'swim',  title:'Natation — Technique',       dur:fmtDur(sSwimMin), desc:`${sSwimKm}km · Échauffement 400m, exercices unilatéraux, pull-buoy.${sp?' Allure cible : '+sp+'.':''} ${a.swimLevel===0?'Focus placement du coude et rotation du corps.':'Maintenir la régularité de la fréquence de nage.'}` },
+    swim_intv:  { type:'swim',  title:'Natation — Intervalles',     dur:fmtDur(sSwimMin), desc:`${sSwimKm}km · 10×100m${sp?' à '+sp:''} récup. 20s. Augmenter la cadence en fin de série. ${a.swimLevel>=1?'Travailler l\'attaque de main.':'Rester régulier sur chaque 100m.'}` },
+    bike_z2:    { type:'bike',  title:'Vélo — Endurance Z2',        dur:fmtDur(sBikeMin), desc:`${sBikeKm}km · Zone 2 (conversation facile)${bp?', ~'+bp:''}. Cadence 85-95 rpm, rester sous 75% FCmax. Travail de position TT si possible.` },
+    bike_long:  { type:'bike',  title:'Vélo — Longue sortie',       dur:fmtDur(lBikeDur), desc:`${lBikeKm}km · 2×20min à allure 70.3${bp?' (~'+bp+')':''} en milieu de sortie. Ravitaillement toutes les 30min (60-90g glucides/h).` },
+    bike_seuil: { type:'bike',  title:'Vélo — Seuil',               dur:fmtDur(sBikeMin+15), desc:`${sBikeKm}km · 3×10min zone 4${bp?' (>'+bp+')':''}, récup. 5min. Maintenir la puissance et la position aéro sur chaque bloc.` },
+    run_z2:     { type:'run',   title:'Course — Endurance Z2',      dur:fmtDur(sRunMin),  desc:`${sRunKm}km · Allure conversationnelle${rp?' (~'+rp+')':''}. Cadence cible 178-182 pas/min. Séance de récupération active.` },
+    run_long:   { type:'run',   title:'Course — Longue sortie',     dur:fmtDur(lRunDur),  desc:`${lRunKm}km · Allure cible 70.3${rp?' ('+rp+')':''}. Gel si > 1h. Récupération active obligatoire le lendemain.` },
+    run_tempo:  { type:'run',   title:'Course — Allure course',     dur:fmtDur(sRunMin+10), desc:`${sRunKm}km · Échauffement 15min, 20min à allure 70.3${rp?' ('+rp+')':''}, retour au calme 10min. Travailler l'économie de foulée.` },
+    brick:      { type:'brick', title:'Enchaînement Vélo→Course',   dur:fmtDur(Math.round(sBikeMin*0.75)+30), desc:`${Math.round(+sBikeKm*0.75)}km vélo${bp?' à '+bp:''} + transition rapide + 25min course${rp?' à '+rp:''}. Gérer les jambes lourdes dès les premiers km de course.` },
+    rest:       { type:'rest',  title:'Repos',                       dur:'',               desc:'Récupération complète. Étirements, rouleau de massage, sommeil 8h. Corps en phase de reconstruction.' },
+    rest_act:   { type:'rest',  title:'Récupération active',         dur:'30min',          desc:'Natation très douce (zone 1) ou marche 30min. Pas d\'effort. Préparer mentalement la semaine à venir.' },
+  };
+
+  const templates = {
+    base:  [W.swim_tech, W.run_z2,    W.bike_z2,    W.swim_intv, W.rest,     W.bike_long, W.run_z2   ],
+    build: [W.swim_tech, W.run_tempo, W.bike_seuil, W.swim_intv, W.run_z2,   W.brick,     W.run_long ],
+    peak:  [W.swim_intv, W.run_tempo, W.bike_long,  W.swim_tech, W.rest_act, W.brick,     W.run_long ],
+  };
+
+  const days = templates[a.phase].map((w, i) => ({ day:DAY[i], type:w.type, title:w.title, desc:w.desc, duration:w.dur }));
+
+  const phaseLabel = { base:'construction aérobie', build:'développement', peak:'affûtage' };
+  const weakest = [{name:'natation', r:a.avgSwimKm/3.8}, {name:'vélo', r:a.avgBikeKm/54}, {name:'course', r:a.avgRunKm/10.5}].sort((x,y) => x.r-y.r)[0];
+  const note = `Phase <strong>${phaseLabel[a.phase]}</strong> · Volume moy. : <strong>${fmtDur(a.totalAvgMin)}/sem.</strong> · Discipline prioritaire : <strong>${weakest.name}</strong>${a.runHR?' · FC course moy. <strong>'+a.runHR+'bpm</strong>':a.bikeHR?' · FC vélo moy. <strong>'+a.bikeHR+'bpm</strong>':''}.`;
+
+  return { days, note };
+}
+
+function fmtDur(min) {
+  if (!min || min <= 0) return '';
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return h > 0 ? (m > 0 ? `${h}h${m.toString().padStart(2,'0')}` : `${h}h`) : `${m}min`;
+}
+
+// ===== CONSEILS =====
+function renderCoachAdvice() {
+  if (!activities.length) {
+    document.getElementById('coachAdvice').innerHTML = '<div class="error-box">Aucune activité Strava trouvée.</div>';
+    return;
   }
-}
+  const a = analyzeAthleteData();
+  const cards = [];
 
-// ===== COACH CHAT =====
-function initCoach() {
-  const ctx = buildAthleteContext();
-  const welcome = `Bonjour ${athlete.firstname} ! 👋\n\nJ'ai analysé tes activités récentes sur Strava.\n${ctx}\n\nQue puis-je faire pour toi ? Nutrition, récupération, technique, objectifs de course...`;
-  addCoachMessage(welcome);
-}
+  // 1. Tendance de volume
+  const trendPct = a.totalAvgMin > 0 ? Math.round((a.thisWeekMin / a.totalAvgMin - 1) * 100) : 0;
+  cards.push({ icon: trendPct > 10 ? '📈' : trendPct < -20 ? '📉' : '📊', title: 'Charge hebdomadaire', accent: trendPct > 25 ? 'var(--danger)' : 'var(--run)',
+    body: trendPct > 10
+      ? `Volume en hausse de <strong>+${trendPct}%</strong> cette semaine (${fmtDur(a.thisWeekMin)} vs moy. ${fmtDur(a.totalAvgMin)}). Bonne dynamique — assure-toi de bien récupérer.`
+      : trendPct < -20
+      ? `Volume en baisse de <strong>${Math.abs(trendPct)}%</strong> cette semaine (${fmtDur(a.thisWeekMin)} vs moy. ${fmtDur(a.totalAvgMin)}). Semaine de récup intentionnelle ou creux de charge ?`
+      : `Volume stable à <strong>${fmtDur(a.thisWeekMin)}</strong> cette semaine (moy. 4 sem. : ${fmtDur(a.totalAvgMin)}). Continue sur cette lancée.`
+  });
 
-function addCoachMessage(text) {
-  const wrap = document.getElementById('chatMessages');
-  wrap.innerHTML += `<div class="msg-coach">
-    <div class="msg-coach-header"><div class="coach-dot">🤖</div><div class="coach-lbl">Coach IA</div></div>
-    <div>${text.replace(/\n/g,'<br>')}</div>
-  </div>`;
-  wrap.scrollTop = wrap.scrollHeight;
-  chatHistory.push({ role: 'assistant', content: text });
-}
+  // 2. Discipline à renforcer vs exigences 70.3
+  const discs = [
+    { name:'Natation', km:a.avgSwimKm, target:3.8,  pace: a.avgSwimSpeed>0 ? formatPace(a.avgSwimSpeed*10)+'/100m' : null },
+    { name:'Vélo',     km:a.avgBikeKm, target:54,   pace: a.avgBikeSpeed>0 ? (a.avgBikeSpeed*3.6).toFixed(0)+'km/h' : null },
+    { name:'Course',   km:a.avgRunKm,  target:10.5, pace: a.avgRunSpeed>0  ? formatPace(a.avgRunSpeed)+'/km' : null },
+  ].sort((x,y) => x.km/x.target - y.km/y.target);
+  const weak = discs[0], strong = discs[2];
+  cards.push({ icon:'🎯', title:'Discipline à renforcer', accent:'var(--accent)',
+    body: `<strong>${weak.name}</strong> est sous-représentée dans tes entraînements (${weak.km.toFixed(1)} km/sem. moy. — objectif 70.3 : ${(weak.target*2).toFixed(0)} km/sem.). Ajoute une séance de ${weak.name.toLowerCase()} cette semaine. Ton point fort : <strong>${strong.name}</strong>${strong.pace?' ('+strong.pace+')':''}.`
+  });
 
-async function sendMessage() {
-  const input = document.getElementById('coachInput');
-  const msg = input.value.trim();
-  if (!msg) return;
-  input.value = '';
-  document.getElementById('sendBtn').disabled = true;
+  // 3. Récupération
+  cards.push({ icon: a.daysSinceLast===0?'✅':a.daysSinceLast<=2?'🔄':a.daysSinceLast<=4?'⏸️':'⚠️', title:'Récupération', accent: a.daysSinceLast>4?'var(--danger)':'var(--run)',
+    body: a.daysSinceLast===0 ? `Entraînement aujourd'hui — bien joué ! Pense à la fenêtre de récupération : protéines dans les 30 min.`
+        : a.daysSinceLast===1 ? `Dernière sortie hier. Corps en reconstruction musculaire active — c'est là que les adaptations se font.`
+        : a.daysSinceLast<=3  ? `<strong>${a.daysSinceLast} jours</strong> depuis ta dernière sortie. Moment idéal pour reprendre avec une séance modérée.`
+        : `<strong>${a.daysSinceLast} jours</strong> sans activité. Reprends progressivement avec une sortie courte en zone 1 pour relancer la machine.`
+  });
 
-  const wrap = document.getElementById('chatMessages');
-  wrap.innerHTML += `<div class="msg-user">${msg}</div>`;
-  chatHistory.push({ role: 'user', content: msg });
-
-  const loadId = 'load-' + Date.now();
-  wrap.innerHTML += `<div class="msg-coach" id="${loadId}">
-    <div class="msg-coach-header"><div class="coach-dot">🤖</div><div class="coach-lbl">Coach IA</div></div>
-    <div class="dots"><span>●</span><span>●</span><span>●</span></div>
-  </div>`;
-  wrap.scrollTop = wrap.scrollHeight;
-
-  try {
-    const res = await fetch('/api/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 400,
-        system: `Tu es un coach triathlon expert et bienveillant. Athlète: ${buildAthleteContext()}. Objectif: 70.3 juin 2026. Réponds en français, de façon concise (3-5 phrases max), pratique et motivante.`,
-        messages: chatHistory.slice(-8)
-      })
+  // 4. Allures et fréquence cardiaque
+  const lines = [];
+  if (a.avgRunSpeed  > 0) lines.push(`Course : <strong>${formatPace(a.avgRunSpeed)}/km</strong>${a.runHR?' · ♥ '+a.runHR+'bpm':''}`);
+  if (a.avgBikeSpeed > 0) lines.push(`Vélo : <strong>${(a.avgBikeSpeed*3.6).toFixed(0)} km/h</strong>${a.bikeHR?' · ♥ '+a.bikeHR+'bpm':''}`);
+  if (a.avgSwimSpeed > 0) lines.push(`Natation : <strong>${formatPace(a.avgSwimSpeed*10)}/100m</strong>${a.swimHR?' · ♥ '+a.swimHR+'bpm':''}`);
+  if (lines.length) {
+    const hiHR = a.runHR > 160 || a.bikeHR > 155;
+    cards.push({ icon:'⚡', title:'Allures moyennes & fréquence cardiaque', accent:'var(--swim)',
+      body: lines.join(' · ') + (hiHR ? '<br><span style="color:var(--danger);font-size:0.8rem;margin-top:4px;display:block;">FC élevée détectée → augmente le volume en zone 2 pour développer l\'efficacité cardiaque.</span>' : '')
     });
-    const data = await res.json();
-    const reply = data.content[0].text;
-    document.getElementById(loadId).querySelector('.dots').innerHTML = reply.replace(/\n/g,'<br>');
-    chatHistory.push({ role: 'assistant', content: reply });
-  } catch(e) {
-    document.getElementById(loadId).querySelector('.dots').textContent = 'Erreur de connexion au coach IA.';
   }
-  document.getElementById('sendBtn').disabled = false;
-  wrap.scrollTop = wrap.scrollHeight;
+
+  // 5. Compte à rebours course
+  const daysLeft  = Math.ceil((new Date('2026-06-14') - new Date()) / 86400000);
+  const weeksLeft = Math.floor(daysLeft / 7);
+  cards.push({ icon:'🏆', title:`70.3 dans ${daysLeft} jours (S-${weeksLeft})`, accent:'var(--accent)',
+    body: weeksLeft > 16 ? `Phase de construction idéale. Mise sur le volume aérobie (>70% du temps en zone 2). Pas d'intensité excessive pour l'instant.`
+        : weeksLeft > 8  ? `Début du développement. Introduis des séances à allure 70.3 et des enchaînements vélo→course. Volume max dans 4-6 semaines.`
+        : weeksLeft > 4  ? `Période clé ! Commence l'affûtage progressif. Priorité : simulations de course, nutrition et transition.`
+        : `Affûtage final ! Réduis le volume de 40-50%, maintiens 2-3 intensités courtes. Prépare ton matériel et ta nutrition de course.`
+  });
+
+  document.getElementById('coachAdvice').innerHTML = cards.map(c => `
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="font-size:1.1rem;">${c.icon}</span>
+        <span style="font-size:0.75rem;font-weight:600;color:${c.accent};text-transform:uppercase;letter-spacing:1px;">${c.title}</span>
+      </div>
+      <div style="font-size:0.84rem;line-height:1.65;color:var(--text);">${c.body}</div>
+    </div>`).join('');
 }
 
 // ===== PROFIL =====
@@ -695,27 +793,13 @@ function renderProfil() {
     </div>`;
 }
 
-// ===== HELPERS =====
-function buildAthleteContext() {
-  if (!activities.length) return 'Aucune activité récente.';
-  const getType = a => a.sport_type || a.type || '';
-  const swim = activities.filter(a => getType(a) === 'Swim');
-  const bike = activities.filter(a => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a)));
-  const run = activities.filter(a => ['Run','TrailRun'].includes(getType(a)));
-  const swimDist = swim.reduce((s,a)=>s+a.distance,0)/1000;
-  const bikeDist = bike.reduce((s,a)=>s+a.distance,0)/1000;
-  const runDist = run.reduce((s,a)=>s+a.distance,0)/1000;
-  const avgSwimPace = swim.length ? swim.reduce((s,a)=>s+(a.average_speed||0),0)/swim.length : 0;
-  const avgRunPace = run.length ? run.reduce((s,a)=>s+(a.average_speed||0),0)/run.length : 0;
-  return `Sur 4 semaines: Natation ${swimDist.toFixed(1)}km (${swim.length} séances${avgSwimPace?' · allure '+formatPace(avgSwimPace*10)+'/100m':''}), Vélo ${bikeDist.toFixed(0)}km (${bike.length} séances), Course ${runDist.toFixed(1)}km (${run.length} séances${avgRunPace?' · allure '+formatPace(avgRunPace)+'/km':''}).`;
-}
-
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'programme' && !document.getElementById('weekPlan').innerHTML) generatePlan();
+  if (name === 'coach') renderCoachAdvice();
   if (name === 'profil') renderProfil();
 }
 
