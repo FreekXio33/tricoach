@@ -726,6 +726,7 @@ function buildTrainingWeek(a) {
   const W = {
     swim_tech:  { type:'swim',  title:'Natation — Technique',       dur:fmtDur(sSwimMin), desc:`${sSwimKm}km · Échauffement 400m, exercices unilatéraux, pull-buoy.${sp?' Allure cible : '+sp+'.':''} ${a.swimLevel===0?'Focus placement du coude et rotation du corps.':'Maintenir la régularité de la fréquence de nage.'}` },
     swim_intv:  { type:'swim',  title:'Natation — Intervalles',     dur:fmtDur(sSwimMin), desc:`${sSwimKm}km · 10×100m${sp?' à '+sp:''} récup. 20s. Augmenter la cadence en fin de série. ${a.swimLevel>=1?'Travailler l\'attaque de main.':'Rester régulier sur chaque 100m.'}` },
+    swim_group: { type:'swim',  title:'Natation — Cours collectif', dur:fmtDur(sSwimMin), desc:`${sSwimKm}km · Séance encadrée en groupe (créneau fixe du mardi soir).${sp?' Allure de référence : '+sp+'.':''} Profiter des retours du coach pour affiner la technique et travailler la régularité.` },
     bike_z2:    { type:'bike',  title:'Vélo — Endurance Z2',        dur:fmtDur(sBikeMin), desc:`${sBikeKm}km · Zone 2 (conversation facile)${bp?', ~'+bp:''}. Cadence 85-95 rpm, rester sous 75% FCmax. Travail de position TT si possible.` },
     bike_long:  { type:'bike',  title:'Vélo — Longue sortie',       dur:fmtDur(lBikeDur), desc:`${lBikeKm}km · 2×20min à allure 70.3${bp?' (~'+bp+')':''} en milieu de sortie. Ravitaillement toutes les 30min (60-90g glucides/h).` },
     bike_seuil: { type:'bike',  title:'Vélo — Seuil',               dur:fmtDur(sBikeMin+15), desc:`${sBikeKm}km · 3×10min zone 4${bp?' (>'+bp+')':''}, récup. 5min. Maintenir la puissance et la position aéro sur chaque bloc.` },
@@ -737,10 +738,11 @@ function buildTrainingWeek(a) {
     rest_act:   { type:'rest',  title:'Récupération active',         dur:'30min',          desc:'Natation très douce (zone 1) ou marche 30min. Pas d\'effort. Préparer mentalement la semaine à venir.' },
   };
 
+  // MAR (index 1) = cours collectif natation fixe tous les mardis soirs
   const templates = {
-    base:  [W.swim_tech, W.run_z2,    W.bike_z2,    W.swim_intv, W.rest,     W.bike_long, W.run_z2   ],
-    build: [W.swim_tech, W.run_tempo, W.bike_seuil, W.swim_intv, W.run_z2,   W.brick,     W.run_long ],
-    peak:  [W.swim_intv, W.run_tempo, W.bike_long,  W.swim_tech, W.rest_act, W.brick,     W.run_long ],
+    base:  [W.swim_tech,  W.swim_group, W.bike_z2,    W.run_z2,    W.rest,     W.bike_long, W.run_z2   ],
+    build: [W.run_tempo,  W.swim_group, W.bike_seuil, W.swim_intv, W.run_z2,   W.brick,     W.run_long ],
+    peak:  [W.swim_intv,  W.swim_group, W.bike_long,  W.run_tempo, W.rest_act, W.brick,     W.run_long ],
   };
 
   const days = templates[a.phase].map((w, i) => ({ day:DAY[i], type:w.type, title:w.title, desc:w.desc, duration:w.dur }));
