@@ -487,13 +487,13 @@ function renderDashboard() {
     const date = new Date(a.start_date_local || a.start_date);
     const dateStr = isNaN(date) ? '' : date.toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'});
     const dist = a.distance > 0 ? (a.distance/1000).toFixed(1) + 'km' : '';
-    const pace = sportType === 'Run' && a.average_speed > 0
-      ? formatPace(a.average_speed) + '/km'
-      : sportType === 'TrailRun' && a.average_speed > 0
-      ? formatPace(a.average_speed) + '/km'
-      : sportType === 'Swim' && a.average_speed > 0
-      ? formatPace(a.average_speed * 10) + '/100m'
-      : a.average_speed > 0 ? (a.average_speed*3.6).toFixed(1) + 'km/h' : '';
+    // Use distance/moving_time for pace (not average_speed which can use elapsed time)
+    const mps = a.moving_time > 0 && a.distance > 0 ? a.distance / a.moving_time : 0;
+    const pace = (sportType === 'Run' || sportType === 'TrailRun') && mps > 0
+      ? formatPace(mps) + '/km'
+      : sportType === 'Swim' && mps > 0
+      ? formatPace(mps * 10) + '/100m'
+      : mps > 0 ? (mps * 3.6).toFixed(1) + 'km/h' : '';
     const hr = a.average_heartrate ? ` · ♥ ${Math.round(a.average_heartrate)}bpm` : '';
     const tc = typeClass[sportType] || 'other';
     const cc = colors[sportType] || 'accent';
@@ -661,8 +661,11 @@ function analyzeAthleteData() {
   const avgBikeMin = bikeActs.reduce((s,a) => s + a.moving_time, 0) / 4 / 60;
   const avgRunMin  = runActs.reduce((s,a)  => s + a.moving_time, 0) / 4 / 60;
 
-  // Average speeds (m/s)
-  const avgSpd = arr => arr.length ? arr.reduce((s,a) => s + (a.average_speed||0), 0) / arr.length : 0;
+  // Average speeds from distance/moving_time (not average_speed which may use elapsed time)
+  const avgSpd = arr => {
+    const valid = arr.filter(a => a.moving_time > 0 && a.distance > 0);
+    return valid.length ? valid.reduce((s,a) => s + a.distance / a.moving_time, 0) / valid.length : 0;
+  };
   const avgSwimSpeed = avgSpd(swimActs);
   const avgBikeSpeed = avgSpd(bikeActs);
   const avgRunSpeed  = avgSpd(runActs);
