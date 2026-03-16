@@ -237,6 +237,12 @@
         </div>
       </div>
 
+      <div class="section-header" style="margin-bottom:0.6rem;">
+        <div class="section-title">Forme du jour</div>
+        <div style="font-size:0.68rem;color:var(--muted);">Basé sur charge Strava</div>
+      </div>
+      <div id="formeDuJour" style="margin-bottom:1.5rem;"></div>
+
       <div class="section-header"><div class="section-title">Charge cette semaine</div></div>
       <div class="stats-grid" id="statsGrid"></div>
 
@@ -421,6 +427,9 @@ function renderDashboard() {
       <div class="stat-value run-c">${(sumDist(run)/1000).toFixed(1)}<span style="font-size:0.9rem">km</span></div>
       <div class="stat-sub">${run.length} séance${run.length>1?'s':''}</div>
     </div>`;
+
+  // Forme du jour
+  renderFormeDuJour();
 
   // Load chart
   renderLoadChart();
@@ -695,6 +704,66 @@ function buildTrainingWeek(a) {
   const note = `Phase <strong>${phaseLabel[a.phase]}</strong> · Volume moy. : <strong>${fmtDur(a.totalAvgMin)}/sem.</strong> · Discipline prioritaire : <strong>${weakest.name}</strong>${a.runHR?' · FC course moy. <strong>'+a.runHR+'bpm</strong>':a.bikeHR?' · FC vélo moy. <strong>'+a.bikeHR+'bpm</strong>':''}.`;
 
   return { days, note };
+}
+
+function renderFormeDuJour() {
+  const now = new Date();
+
+  // Acute load: sum of moving_time (min) over last 7 days
+  const cutAcute    = new Date(now - 7  * 86400000);
+  const cutChronic  = new Date(now - 42 * 86400000);
+  const acuteActs   = activities.filter(a => new Date(a.start_date) >= cutAcute);
+  const chronicActs = activities.filter(a => new Date(a.start_date) >= cutChronic);
+  const acuteMin    = acuteActs.reduce((s,a)  => s + a.moving_time/60, 0);
+  const chronicMin  = chronicActs.reduce((s,a) => s + a.moving_time/60, 0);
+  // Chronic weekly average over 6 weeks
+  const chronicAvgMin = chronicMin / 6;
+
+  // Training Stress Balance proxy: positive = fresh, negative = fatigued
+  const tsb = chronicAvgMin - acuteMin;
+
+  // Last activity HR vs baseline
+  const allHR       = activities.filter(a => a.average_heartrate);
+  const baselineHR  = allHR.length ? allHR.reduce((s,a) => s + a.average_heartrate, 0) / allHR.length : 0;
+  const lastHR      = acuteActs.find(a => a.average_heartrate)?.average_heartrate || baselineHR;
+  const hrFactor    = baselineHR > 0 ? lastHR / baselineHR : 1;
+
+  const daysSince = activities.length ? Math.floor((now - new Date(activities[0].start_date)) / 86400000) : 7;
+
+  // Score 0–100
+  const tsbBonus  = Math.round(Math.max(-25, Math.min(25, tsb / 50 * 25)));
+  const restBonus = Math.min(20, daysSince * 6);
+  const hrPenalty = hrFactor > 1.08 ? Math.round((hrFactor - 1) * 60) : 0;
+  const score     = Math.min(100, Math.max(10, 60 + tsbBonus + restBonus - hrPenalty));
+
+  const label = score >= 80 ? 'Très bonne forme' : score >= 65 ? 'Bonne forme' : score >= 50 ? 'Forme correcte' : 'Fatigue détectée';
+  const color = score >= 80 ? '#06d6a0' : score >= 65 ? '#90e0ef' : score >= 50 ? '#f77f00' : '#ff4d6d';
+  const emoji = score >= 80 ? '🟢' : score >= 65 ? '🔵' : score >= 50 ? '🟡' : '🔴';
+
+  const circum = 2 * Math.PI * 26;
+  const dash   = (circum * score / 100).toFixed(1);
+
+  document.getElementById('formeDuJour').innerHTML = `
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);display:flex;align-items:center;gap:16px;">
+      <div style="position:relative;flex-shrink:0;width:64px;height:64px;">
+        <svg width="64" height="64" viewBox="0 0 64 64">
+          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--border)" stroke-width="5"/>
+          <circle cx="32" cy="32" r="26" fill="none" stroke="${color}" stroke-width="5"
+            stroke-dasharray="${dash} ${circum.toFixed(1)}"
+            stroke-linecap="round" transform="rotate(-90 32 32)" style="transition:stroke-dasharray 0.6s ease"/>
+        </svg>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Bebas Neue',sans-serif;font-size:1.25rem;color:${color};line-height:1;">${score}</div>
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.95rem;font-weight:600;">${emoji} ${label}</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:4px;line-height:1.5;">
+          Charge 7j : <strong>${Math.round(acuteMin)}min</strong> · Moy./sem. : <strong>${Math.round(chronicAvgMin)}min</strong><br>
+          ${daysSince === 0 ? 'Entraînement aujourd\'hui' : daysSince === 1 ? '1 jour de repos' : daysSince + ' jours de repos'}
+          ${baselineHR > 0 && lastHR > 0 ? ' · FC récente : ' + Math.round(lastHR) + 'bpm' : ''}
+          ${tsb > 15 ? ' · <span style="color:#06d6a0">Fraîcheur accumulée</span>' : tsb < -25 ? ' · <span style="color:#ff4d6d">Surcharge détectée</span>' : ''}
+        </div>
+      </div>
+    </div>`;
 }
 
 function fmtDur(min) {
