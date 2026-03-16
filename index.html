@@ -216,11 +216,23 @@
       <div class="goal-banner">
         <div class="goal-icon">🏆</div>
         <div>
-          <div class="goal-title">Objectif</div>
+          <div class="goal-title">Objectif principal</div>
           <div class="goal-name">Triathlon 70.3 — Juin 2026</div>
         </div>
         <div style="text-align:center;margin-left:auto;">
           <div class="goal-days" id="daysLeft">-</div>
+          <div class="goal-days-lbl">jours</div>
+        </div>
+      </div>
+      <div class="goal-banner" style="border:1px solid rgba(6,214,160,0.25);margin-top:-1rem;">
+        <div class="goal-icon">🏃</div>
+        <div>
+          <div class="goal-title">Objectif intermédiaire</div>
+          <div class="goal-name" style="color:var(--run);">Semi — Villeneuve-lès-Maguelone</div>
+          <div style="font-size:0.72rem;color:var(--muted);margin-top:3px;">Cible 1h35 · Allure <strong style="color:var(--run);">4:30/km</strong></div>
+        </div>
+        <div style="text-align:center;margin-left:auto;">
+          <div class="goal-days" id="semiDaysLeft" style="color:var(--run);">-</div>
           <div class="goal-days-lbl">jours</div>
         </div>
       </div>
@@ -350,10 +362,12 @@ async function loadApp(token) {
   document.getElementById('headerAvatar').src = athlete.profile_medium || athlete.profile;
   document.getElementById('headerName').textContent = athlete.firstname;
 
-  // Days to goal
+  // Days to goals
   const goalDate = new Date('2026-06-14');
   const days = Math.ceil((goalDate - new Date()) / 86400000);
   document.getElementById('daysLeft').textContent = days;
+  const semiDate = new Date('2026-04-12');
+  document.getElementById('semiDaysLeft').textContent = Math.ceil((semiDate - new Date()) / 86400000);
 
   await fetchActivities(token.access_token);
 }
