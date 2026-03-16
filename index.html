@@ -2880,9 +2880,13 @@ async function renderFormeGarmin() {
   const el = document.getElementById('formeGarminWidget');
   if (!el) return;
 
-  if (!_sb || !_sbReady) { el.innerHTML = ''; return; }
+  if (!_sb || !_sbReady) {
+    console.warn('[Garmin] Supabase not ready (_sb:', !!_sb, '_sbReady:', _sbReady, ')');
+    el.innerHTML = '';
+    return;
+  }
 
-  // Read athlete_id from strava_token in localStorage
+  // Read athlete_id from multiple sources
   let athleteId = athlete?.id;
   if (!athleteId) {
     try {
@@ -2890,21 +2894,42 @@ async function renderFormeGarmin() {
       if (t) athleteId = JSON.parse(t)?.athlete?.id;
     } catch {}
   }
-  if (!athleteId) { el.innerHTML = ''; return; }
+  console.log('[Garmin] athlete_id =', athleteId);
 
-  // Fetch last 8 days
-  const d8ago = new Date(); d8ago.setDate(d8ago.getDate() - 8);
+  // Strategy 1: filtered by athlete_id
   let rows = [];
-  try {
-    const { data } = await _sb.from('garmin_daily')
-      .select('date,body_battery,hrv,sleep_score,sleep_duration,stress,spo2')
-      .eq('athlete_id', athleteId)
-      .gte('date', d8ago.toISOString().split('T')[0])
-      .order('date', { ascending: false });
-    rows = data || [];
-  } catch(e) { el.innerHTML = ''; return; }
+  if (athleteId) {
+    try {
+      const d8ago = new Date(); d8ago.setDate(d8ago.getDate() - 8);
+      const { data, error } = await _sb.from('garmin_daily')
+        .select('date,body_battery,hrv,sleep_score,sleep_duration,stress,spo2,athlete_id')
+        .eq('athlete_id', athleteId)
+        .gte('date', d8ago.toISOString().split('T')[0])
+        .order('date', { ascending: false });
+      console.log('[Garmin] filtered query → rows:', data?.length, 'error:', error?.message);
+      rows = data || [];
+    } catch(e) { console.error('[Garmin] filtered query threw:', e); }
+  }
 
-  if (!rows.length) { el.innerHTML = ''; return; }
+  // Strategy 2 (fallback): just fetch the 3 most recent rows from the whole table
+  if (!rows.length) {
+    try {
+      const { data, error } = await _sb.from('garmin_daily')
+        .select('date,body_battery,hrv,sleep_score,sleep_duration,stress,spo2,athlete_id')
+        .order('date', { ascending: false })
+        .limit(8);
+      console.log('[Garmin] unfiltered fallback → rows:', data?.length, 'error:', error?.message, 'sample:', data?.[0]);
+      rows = data || [];
+    } catch(e) { console.error('[Garmin] unfiltered query threw:', e); }
+  }
+
+  if (!rows.length) {
+    console.warn('[Garmin] No data found at all — card hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  console.log('[Garmin] Using row:', rows[0]);
 
   const r = rows[0];
 
