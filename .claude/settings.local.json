@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(git init:*)",
+      "Bash(cp:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git add:*)",
+      "Bash(node:*)",
+      "Bash(which vercel:*)",
+      "Bash(npm install:*)",
+      "Bash(vercel:*)"
+    ]
+  }
+}

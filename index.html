@@ -259,6 +259,37 @@
   .nutr-item { display:flex; justify-content:space-between; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:0.82rem; }
   .nutr-item:last-child { border-bottom:none; }
   .nutr-val { font-weight:600; color:var(--accent); }
+
+  /* SESSION DETAIL MODAL */
+  .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;display:flex;align-items:flex-end;justify-content:center; }
+  .modal-sheet { background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:600px;max-height:88vh;overflow-y:auto;padding:1.25rem 1.5rem 2.5rem; }
+  .modal-handle { width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 1rem; }
+  .modal-title { font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:1px; }
+  .session-block { margin-bottom:0.85rem; }
+  .session-block-hdr { font-size:0.67rem;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;color:var(--muted);padding:0.4rem 0.65rem;background:var(--surface2);border-radius:7px 7px 0 0;border:1px solid var(--border);border-bottom:none; }
+  .session-block-body { background:var(--surface2);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:0.6rem 0.65rem; }
+  .interval-row { display:flex;align-items:flex-start;gap:8px;padding:0.38rem 0;border-bottom:1px solid rgba(255,255,255,0.04); }
+  .interval-row:last-child { border-bottom:none; }
+  .interval-dot { width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:6px; }
+  .interval-main { font-size:0.82rem;line-height:1.4; }
+  .interval-target { font-size:0.72rem;color:var(--muted);margin-top:2px;line-height:1.4; }
+
+  /* DEBRIEF */
+  .debrief-section { margin-bottom:1.1rem;background:var(--surface2);border-radius:10px;padding:0.85rem;border:1px solid var(--border); }
+  .debrief-section-title { font-size:0.67rem;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;color:var(--muted);margin-bottom:0.7rem; }
+  .star { font-size:1.4rem;cursor:pointer;opacity:0.25;transition:opacity 0.12s,transform 0.12s;display:inline-block;user-select:none; }
+  .star.active { opacity:1; }
+  .star:hover { transform:scale(1.18); }
+  .rpe-btn { display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-size:0.75rem;font-weight:700;cursor:pointer;opacity:0.35;border:1px solid var(--border);background:var(--surface);transition:all 0.12s;user-select:none; }
+  .rpe-btn.active { opacity:1;border-color:transparent; }
+  .compare-table { width:100%;border-collapse:collapse;font-size:0.78rem; }
+  .compare-table th { color:var(--muted);font-weight:600;padding:0.32rem 0.45rem;text-align:left;border-bottom:1px solid var(--border); }
+  .compare-table td { padding:0.32rem 0.45rem;border-bottom:1px solid var(--border); }
+  .compare-table tr:last-child td { border-bottom:none; }
+  .cmp-ok { color:#06d6a0;font-weight:600; }
+  .cmp-warn { color:#f77f00;font-weight:600; }
+  .cmp-bad { color:#ff4d6d;font-weight:600; }
+  .score-badge { display:inline-block;padding:3px 12px;border-radius:20px;font-weight:700;font-size:0.85rem;margin-bottom:0.65rem; }
 </style>
 </head>
 <body>
@@ -447,6 +478,30 @@
   </div>
 </div>
 
+<!-- SESSION DETAIL MODAL -->
+<div id="sessionModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeSessionModal()">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+      <div id="sessionModalTitle" class="modal-title"></div>
+      <button onclick="closeSessionModal()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;padding:0 0 0 1rem;line-height:1;flex-shrink:0;">×</button>
+    </div>
+    <div id="sessionModalBody"></div>
+  </div>
+</div>
+
+<!-- DEBRIEF MODAL -->
+<div id="debriefModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeDebrief()">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+      <div id="debriefModalTitle" class="modal-title">Débrief Séance</div>
+      <button onclick="closeDebrief()" style="background:none;border:none;color:var(--muted);font-size:1.6rem;cursor:pointer;padding:0 0 0 1rem;line-height:1;flex-shrink:0;">×</button>
+    </div>
+    <div id="debriefModalBody"></div>
+  </div>
+</div>
+
 <script>
 // ===== CONFIG =====
 const CLIENT_ID = '212070';
@@ -461,6 +516,8 @@ let _sbReady = false; // tables confirmed to exist
 let athlete = null;
 let activities = [];
 let _sbSyncing = false; // prevent concurrent syncs
+let currentPlan = null;
+let currentAnalysis = null;
 
 // ===== INIT =====
 window.addEventListener('load', async () => {
@@ -771,6 +828,8 @@ function generatePlan() {
     try {
       const analysis = analyzeAthleteData();
       const plan = buildTrainingWeek(analysis);
+      currentPlan = plan;
+      currentAnalysis = analysis;
 
       document.getElementById('planLoading').style.display = 'none';
       document.getElementById('regenBtn').disabled = false;
@@ -778,6 +837,7 @@ function generatePlan() {
       document.getElementById('weekPlan').innerHTML = plan.days.map((d, i) => {
         const today = new Date().toISOString().split('T')[0];
         const isDone = localStorage.getItem(`done_${today}_${i}`) === '1';
+        const safeTitle = d.title.replace(/'/g,'').replace(/"/g,'');
         return `<div class="day-card ${d.type === 'rest' ? 'rest' : ''}" id="dayCard-${i}">
           <div class="day-label">${d.day}</div>
           <div class="day-stripe ${d.type}"></div>
@@ -787,7 +847,11 @@ function generatePlan() {
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
-            ${d.type !== 'rest' ? `<button onclick="markDayDone(${i},'${d.title.replace(/'/g,'').replace(/"/g,'')}','${d.type}')" style="background:${isDone?'var(--run)':'var(--surface2)'};color:${isDone?'white':'var(--muted)'};border:1px solid ${isDone?'transparent':'var(--border)'};border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">${isDone?'✓ Fait':'Valider'}</button>` : ''}
+            ${d.type !== 'rest' ? `
+              <button onclick="openSessionModal(${i})" style="background:rgba(199,125,255,0.1);color:var(--accent);border:1px solid rgba(199,125,255,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📋 Voir</button>
+              <button onclick="markDayDone(${i},'${safeTitle}','${d.type}')" id="doneBtn-${i}" style="background:${isDone?'var(--run)':'var(--surface2)'};color:${isDone?'white':'var(--muted)'};border:1px solid ${isDone?'transparent':'var(--border)'};border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">${isDone?'✓ Fait':'Valider'}</button>
+              <button onclick="openDebrief(${i})" id="debriefBtn-${i}" style="display:${isDone?'block':'none'};background:rgba(6,214,160,0.1);color:var(--run);border:1px solid rgba(6,214,160,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📝 Débrief</button>
+            ` : ''}
           </div>
         </div>`;
       }).join('');
@@ -911,7 +975,12 @@ function buildTrainingWeek(a) {
     peak:  [W.swim_intv,  W.swim_group, W.bike_long,  W.run_tempo, W.rest_act, W.brick,     W.run_long ],
   };
 
-  const days = templates[a.phase].map((w, i) => ({ day:DAY[i], type:w.type, title:w.title, desc:w.desc, duration:w.dur }));
+  const templateKeys = {
+    base:  ['swim_tech', 'swim_group', 'bike_z2',    'run_z2',    'rest',     'bike_long', 'run_z2'   ],
+    build: ['run_tempo', 'swim_group', 'bike_seuil', 'swim_intv', 'run_z2',   'brick',     'run_long' ],
+    peak:  ['swim_intv', 'swim_group', 'bike_long',  'run_tempo', 'rest_act', 'brick',     'run_long' ],
+  };
+  const days = templates[a.phase].map((w, i) => ({ day:DAY[i], key:templateKeys[a.phase][i], type:w.type, title:w.title, desc:w.desc, duration:w.dur }));
 
   const phaseLabel = { base:'construction aérobie', build:'développement', peak:'affûtage' };
   const weakest = [{name:'natation', r:a.avgSwimKm/3.8}, {name:'vélo', r:a.avgBikeKm/54}, {name:'course', r:a.avgRunKm/10.5}].sort((x,y) => x.r-y.r)[0];
@@ -2502,24 +2571,23 @@ async function markDayDone(idx, title, type) {
   const today = new Date().toISOString().split('T')[0];
   const key = `done_${today}_${idx}`;
   const isDone = localStorage.getItem(key) === '1';
-  if (isDone) {
-    localStorage.removeItem(key);
-  } else {
+  const nowDone = !isDone;
+  if (nowDone) {
     localStorage.setItem(key, '1');
     await sbMarkWorkoutDone(idx, title, type);
+  } else {
+    localStorage.removeItem(key);
   }
-  // Update button UI
-  const card = document.getElementById(`dayCard-${idx}`);
-  if (card) {
-    const btn = card.querySelector('button');
-    if (btn) {
-      const nowDone = !isDone;
-      btn.textContent = nowDone ? '✓ Fait' : 'Valider';
-      btn.style.background = nowDone ? 'var(--run)' : 'var(--surface2)';
-      btn.style.color = nowDone ? 'white' : 'var(--muted)';
-      btn.style.borderColor = nowDone ? 'transparent' : 'var(--border)';
-    }
+  const doneBtn = document.getElementById(`doneBtn-${idx}`);
+  const debriefBtn = document.getElementById(`debriefBtn-${idx}`);
+  if (doneBtn) {
+    doneBtn.textContent = nowDone ? '✓ Fait' : 'Valider';
+    doneBtn.style.background = nowDone ? 'var(--run)' : 'var(--surface2)';
+    doneBtn.style.color = nowDone ? 'white' : 'var(--muted)';
+    doneBtn.style.borderColor = nowDone ? 'transparent' : 'var(--border)';
   }
+  if (debriefBtn) debriefBtn.style.display = nowDone ? 'block' : 'none';
+  if (nowDone) setTimeout(() => openDebrief(idx), 500);
 }
 
 async function renderWeeklyGoalsWidget() {
@@ -2578,6 +2646,462 @@ async function saveGoals() {
   const run  = parseFloat(document.getElementById('g_run')?.value)  || null;
   await sbSaveWeeklyGoals({ swim, bike, run });
   renderWeeklyGoalsWidget();
+}
+
+// ===== SESSION DETAIL =====
+function parseDurationMin(s) {
+  if (!s) return null;
+  const h = (s.match(/(\d+)h/) || [])[1] || 0;
+  const m = (s.match(/(\d+)min/) || [])[1] || 0;
+  const total = parseInt(h) * 60 + parseInt(m);
+  return total || null;
+}
+
+function buildSessionDetail(key, mv, a) {
+  const ftp = mv.ftp || 0;
+  const hrMax = mv.hrMax || 185;
+  const hrRest = mv.hrRest || 55;
+  const vma = mv.vma || 0;
+  const swimPaceDec = mv.swimPace || 0;
+  const runPace703 = mv.runPace703 || 0;
+  const runPaceSemi = mv.runPaceSemi || 0;
+
+  const ftpEst = ftp > 0 ? ftp : (a.avgBikeSpeed > 0 ? Math.round(a.avgBikeSpeed * 3.6 * 13) : 200);
+  const vmaEst = vma > 0 ? vma : (a.avgRunSpeed > 0 ? +(a.avgRunSpeed * 3.6 * 1.1).toFixed(1) : 15);
+  const swimEst = swimPaceDec > 0 ? swimPaceDec : (a.avgSwimSpeed > 0 ? +(100 / a.avgSwimSpeed / 60).toFixed(2) : 2.0);
+
+  const hrr = hrMax - hrRest;
+  const zHR = (lo, hi) => `${Math.round(hrRest + lo * hrr)}-${Math.round(hrRest + hi * hrr)} bpm`;
+  const pw = (lo, hi) => ftpEst > 0
+    ? `${Math.round(ftpEst * lo)}-${Math.round(ftpEst * hi)}W <span style="color:var(--muted)">(${Math.round(lo * 100)}-${Math.round(hi * 100)}% FTP)</span>`
+    : `${Math.round(lo * 100)}-${Math.round(hi * 100)}% FTP`;
+  const pwS = (p) => ftpEst > 0 ? `${Math.round(ftpEst * p)}W (${Math.round(p * 100)}% FTP)` : `${Math.round(p * 100)}% FTP`;
+  const vmaMps = vmaEst / 3.6;
+  const runPct = (pct) => { const s = Math.round(1000 / (vmaMps * pct)); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}/km`; };
+  const runEasy = runPct(0.73), runZ2 = runPct(0.73), recupRun = runPct(0.64);
+  const runTempo = runPaceSemi > 0 ? fmtDecPace(runPaceSemi) + '/km' : runPct(0.88);
+  const runRace = runPace703 > 0 ? fmtDecPace(runPace703) + '/km' : runPct(0.85);
+  const swimSec = Math.round(swimEst * 60);
+  const swimFmt = (d) => { const t = swimSec + d; return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}/100m`; };
+  const swimDep = (d) => { const t = Math.ceil((swimSec + d + 20) / 5) * 5; return `départ / ${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`; };
+
+  const blk = (hdr, col, items) =>
+    `<div class="session-block">
+      <div class="session-block-hdr">${hdr}</div>
+      <div class="session-block-body">
+        ${items.map(it => `<div class="interval-row">
+          <div class="interval-dot" style="background:${col};"></div>
+          <div>
+            <div class="interval-main">${it.l}</div>
+            ${it.t ? `<div class="interval-target">🎯 ${it.t}</div>` : ''}
+            ${it.r ? `<div class="interval-target">↩ Récup : ${it.r}</div>` : ''}
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+
+  const SC = 'var(--swim)', BC = 'var(--bike)', RC = 'var(--run)', GC = 'var(--muted)';
+
+  const S = {
+    swim_tech: [
+      blk('🔥 ÉCHAUFFEMENT · 10min', SC, [
+        { l:'400m nage libre facile', t:`${swimFmt(30)} · FC ${zHR(0.50,0.65)} (Z1-Z2)` },
+        { l:'4×25m exercices technique (fingertip drag, catch-up)', t:'15s récup · focus placement du coude' },
+      ]),
+      blk('💪 BLOC PRINCIPAL · 30min', SC, [
+        { l:'6×50m drill unilatéral', t:`${swimFmt(25)} · ${swimDep(25)}`, r:'15s' },
+        { l:'4×100m pull-buoy', t:`${swimFmt(8)} · FC ${zHR(0.60,0.75)} (Z2-Z3)`, r:'20s' },
+        { l:'4×75m variation d\'allure (25 facile / 25 rapide / 25 facile)', t:`25m rapide : ${swimFmt(-8)}` },
+      ]),
+      blk('🧊 RETOUR AU CALME · 5min', SC, [
+        { l:'200m libre très facile', t:'Respiration et relâchement complet' },
+      ]),
+    ],
+    swim_intv: [
+      blk('🔥 ÉCHAUFFEMENT · 10min', SC, [
+        { l:'300m nage complète facile', t:swimFmt(25) },
+        { l:'4×25m sprints courts', t:`${swimFmt(-18)} · récup 20s — activer le système nerveux` },
+      ]),
+      blk('💪 BLOC PRINCIPAL · 35min', SC, [
+        { l:'8×100m intervalles (progressif)', t:`${swimFmt(3)} → ${swimFmt(-5)} · FC ${zHR(0.70,0.85)} (Z3-Z4)`, r:swimDep(5) },
+        { l:'2×200m soutenu', t:`${swimFmt(8)} · FC ${zHR(0.65,0.80)} (Z3)`, r:'30s' },
+      ]),
+      blk('🧊 RETOUR AU CALME · 5min', SC, [
+        { l:'200m dos ou facile', t:'Récupération active, pas de performance' },
+      ]),
+    ],
+    swim_group: [
+      blk('👥 COURS COLLECTIF — MARDI SOIR', SC, [
+        { l:'Séance encadrée par le coach de groupe', t:`Référence vitesse personnelle : ${swimFmt(0)} — adapte selon ta lane` },
+        { l:'Rotation du corps (45°) + respiration bilatérale (cycles de 3 ou 5)', t:`FC cible Z2-Z3 : ${zHR(0.60,0.80)}` },
+        { l:'Après la séance : note 1 point technique à travailler', t:'Pour progresser seul la prochaine séance solo' },
+      ]),
+    ],
+    bike_z2: [
+      blk('🔥 ÉCHAUFFEMENT · 15min', BC, [
+        { l:'15min pédalage progressif Z1→Z2', t:`${pw(0.50,0.62)} · FC ${zHR(0.50,0.65)}` },
+      ]),
+      blk('💪 BLOC PRINCIPAL — Zone 2 continue', BC, [
+        { l:'Pédalage continu Zone 2', t:`${pw(0.60,0.75)} · FC ${zHR(0.60,0.73)} (Z2)` },
+        { l:'Cadence : 85-95 rpm — passer un rapport plus léger si < 85 rpm', t:'Position TT 50% du temps si possible' },
+        { l:'Ravitaillement', t:'500-750ml/h · 40-50g glucides/h si > 90min' },
+      ]),
+      blk('🧊 RETOUR AU CALME · 10min', BC, [
+        { l:'10min pédalage très facile Z1', t:`< ${pwS(0.50)} · FC < ${Math.round(hrRest + 0.55*hrr)} bpm` },
+      ]),
+    ],
+    bike_seuil: [
+      blk('🔥 ÉCHAUFFEMENT · 20min', BC, [
+        { l:'15min pédalage progressif Z1→Z2', t:`${pw(0.45,0.68)} · FC ${zHR(0.50,0.70)}` },
+        { l:'2×3min montée progressive', t:`Terminer à ${pwS(0.85)} · récup 2min facile entre les deux` },
+      ]),
+      blk('💪 BLOC PRINCIPAL — 3×10min seuil', BC, [
+        { l:'Bloc 1 — 10min Zone 4', t:`${pw(0.93,1.03)} · FC ${zHR(0.78,0.88)} (Z4)`, r:`5min facile ${pwS(0.50)}` },
+        { l:'Bloc 2 — 10min Zone 4', t:`${pw(0.95,1.05)} · maintenir position aéro`, r:`5min facile ${pwS(0.50)}` },
+        { l:'Bloc 3 — 10min Zone 4', t:`${pw(0.95,1.05)} · légèrement plus fort si tu en as encore`, r:'Fin bloc — récupération' },
+      ]),
+      blk('🧊 RETOUR AU CALME · 10min', BC, [
+        { l:'10min Z1 très facile', t:`< ${pwS(0.50)} · cadence libre` },
+      ]),
+    ],
+    bike_long: [
+      blk('🔥 MISE EN ROUTE · 20min', BC, [
+        { l:'20min endurance progressive Z2', t:`${pw(0.58,0.70)} · FC ${zHR(0.58,0.72)}` },
+      ]),
+      blk('💪 BLOCS SWEETSPOT — 2×20min', BC, [
+        { l:'Sweetspot bloc 1 — 20min', t:`${pw(0.87,0.93)} · FC ${zHR(0.72,0.83)} (Z3-Z4)`, r:`10min Z2 — ${pw(0.60,0.72)}` },
+        { l:'Sweetspot bloc 2 — 20min', t:`${pw(0.87,0.93)} · travailler la position TT`, r:'Retour Z2 jusqu\'à la fin' },
+        { l:'Finir en Z2', t:`${pw(0.60,0.72)} · ravitaillement 60-90g CHO/h` },
+      ]),
+      blk('🧊 RETOUR AU CALME · 15min', BC, [
+        { l:'Pédalage très facile Z1', t:`< ${pwS(0.53)} · préparation récupération post-sortie` },
+      ]),
+    ],
+    run_z2: [
+      blk('🔥 DÉPART PROGRESSIF · 5min', RC, [
+        { l:'5min marche rapide ou trot léger', t:`Allure > ${runPct(0.60)} · FC < ${Math.round(hrRest+0.55*hrr)} bpm` },
+      ]),
+      blk('💪 BLOC PRINCIPAL — Endurance Z2', RC, [
+        { l:'Run continu allure conversationnelle', t:`${runZ2} ± 15s/km · FC ${zHR(0.60,0.73)} (Z2)` },
+        { l:'Cadence foulée 178-182 pas/min', t:'Pas courts et fréquents, attaque milieu de pied' },
+        { l:'Test conversation : tu dois parler en phrases complètes', t:'Si impossible → ralentis immédiatement' },
+      ]),
+      blk('🧊 RETOUR AU CALME · 5min', RC, [
+        { l:'5min marche + étirements légers', t:'Quadriceps, mollets, hanches — 30s/muscle' },
+      ]),
+    ],
+    run_tempo: [
+      blk('🔥 ÉCHAUFFEMENT · 15min', RC, [
+        { l:'15min trot facile progressif', t:`${recupRun} → ${runEasy} · FC ${zHR(0.55,0.68)}` },
+        { l:'6 montées (strides) 20s', t:'Accélération progressive 80-90% · récup marche 30s' },
+      ]),
+      blk('💪 BLOC PRINCIPAL — 3×10min tempo', RC, [
+        { l:'Bloc 1 — 10min allure tempo', t:`${runTempo} · FC ${zHR(0.78,0.87)} (Z4)`, r:'3min trot — ' + recupRun },
+        { l:'Bloc 2 — 10min allure tempo', t:`${runTempo} · maintenir économie de foulée`, r:'3min trot — ' + recupRun },
+        { l:'Bloc 3 — 10min allure tempo', t:`${runTempo} · légèrement plus vite si possible`, r:'Début retour au calme' },
+      ]),
+      blk('🧊 RETOUR AU CALME · 10min', RC, [
+        { l:'10min trot très facile + marche', t:`> ${runPct(0.60)} · FC < ${Math.round(hrRest+0.60*hrr)} bpm` },
+      ]),
+    ],
+    run_long: [
+      blk('🔥 MISE EN ROUTE · 15min', RC, [
+        { l:'15min allure très facile', t:`> ${runPct(0.63)} · FC ${zHR(0.55,0.65)} (Z1-Z2)` },
+      ]),
+      blk('💪 BLOC PRINCIPAL — Progressive', RC, [
+        { l:'1ère moitié — Endurance Z2', t:`${runZ2} ± 10s · FC ${zHR(0.60,0.73)}` },
+        { l:'2ème moitié — Allure 70.3', t:`${runRace} · FC ${zHR(0.72,0.83)} (Z3-Z4)` },
+        { l:'Ravitaillement', t:'1 gel si > 75min · 400-500ml/h · sels si > 25°C' },
+      ]),
+      blk('🧊 RETOUR AU CALME · 10min', RC, [
+        { l:'Marche + étirements 45s/muscle', t:'Mollets, quadriceps, ischio-jambiers, fléchisseurs de hanche' },
+      ]),
+    ],
+    brick: [
+      blk('🔥 VÉLO — MISE EN ROUTE · 10min', BC, [
+        { l:'10min pédalage Z1-Z2', t:`${pw(0.50,0.65)} · activer les jambes` },
+      ]),
+      blk('🚴 BLOC VÉLO · 45min', BC, [
+        { l:'35min Zone 2-3 soutenu', t:`${pw(0.70,0.85)} · FC ${zHR(0.65,0.78)} (Z2-Z3)` },
+        { l:'10 dernières min — accélération', t:`${pw(0.80,0.90)} · préparer la transition` },
+        { l:'⚡ Transition T2 — objectif < 90s', t:'Rack vélo → chaussures run → dossard → casquette' },
+      ]),
+      blk('🏃 BLOC COURSE · 25min', RC, [
+        { l:'5min trot malgré les jambes lourdes', t:`${runPct(0.65)}-${runPct(0.70)} · c\'est normal au départ de brick` },
+        { l:'15min allure course cible', t:`${runRace} · FC ${zHR(0.72,0.83)} (Z3-Z4)` },
+        { l:'5min retour au calme', t:`> ${runPct(0.60)} · respiration` },
+      ]),
+    ],
+    rest: [
+      blk('😴 RÉCUPÉRATION COMPLÈTE', GC, [
+        { l:'Repos actif : marche légère 20-30min max', t:'Pas d\'effort, juste activer la circulation' },
+        { l:'Nutrition récupération', t:'Protéines + glucides complexes · Hydratation 2L+ eau' },
+        { l:'Sommeil 8h — la récupération musculaire se fait la nuit', t:'Couche-toi 30min plus tôt ce soir' },
+        { l:'Rouleau de massage 10-15min', t:'Quadriceps, mollets, dos — technique lente' },
+      ]),
+    ],
+    rest_act: [
+      blk('🧘 RÉCUPÉRATION ACTIVE · 30min', GC, [
+        { l:'Natation très douce Z1 OU marche 30min', t:`Nage : > ${swimFmt(40)} · Marche : < 5km/h` },
+        { l:'FC max de la séance', t:`< ${Math.round(hrRest+0.60*hrr)} bpm (Z1 uniquement)` },
+        { l:'Étirements ou yoga léger 15-20min', t:'Mobilité hanches et épaules' },
+      ]),
+    ],
+  };
+
+  const blocks = S[key] || S.rest;
+  const tips = {
+    swim_tech:'💡 Focus qualité : si la technique se dégrade, ralentis plutôt qu\'accélérer.',
+    swim_intv:'💡 Maintiens ta forme de nage sur le dernier intervalle — c\'est là que ça se gagne.',
+    swim_group:'💡 Identifie 1 point technique à retenir du coach pour ton prochain entraînement solo.',
+    bike_z2:'💡 Zone 2 semble trop lente ? C\'est là que l\'endurance aérobie se construit vraiment.',
+    bike_seuil:'💡 Si le dernier bloc est raté, c\'est que les premiers étaient trop intenses.',
+    bike_long:'💡 Commence à te ravitailler à 45min — avant d\'avoir faim ou soif.',
+    run_z2:'💡 Cadence 180 pas/min réduit l\'impact au sol et prévient les blessures.',
+    run_tempo:'💡 L\'allure tempo doit être inconfortable mais tenable sur 10min.',
+    run_long:'💡 Negative split : démarre 10-15s/km plus lentement que ton allure cible.',
+    brick:'💡 Les jambes lourdes au début de la course sont normales — ça passe après 5-8min.',
+    rest:'💡 Le repos fait partie du plan — ne le remplace pas.',
+    rest_act:'💡 L\'objectif est la circulation sanguine, pas la performance.',
+  };
+
+  return blocks.join('') +
+    (tips[key] ? `<div style="background:rgba(199,125,255,0.07);border:1px solid rgba(199,125,255,0.18);border-radius:8px;padding:0.6rem 0.8rem;font-size:0.78rem;color:var(--muted);line-height:1.5;margin-top:0.5rem;">${tips[key]}</div>` : '');
+}
+
+function openSessionModal(dayIdx) {
+  if (!currentPlan) return;
+  const day = currentPlan.days[dayIdx];
+  if (!day) return;
+  const mv = getMetrics();
+  const a = currentAnalysis || analyzeAthleteData();
+  document.getElementById('sessionModalTitle').textContent = day.title;
+  document.getElementById('sessionModalBody').innerHTML = buildSessionDetail(day.key, mv, a);
+  document.getElementById('sessionModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSessionModal() {
+  document.getElementById('sessionModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// ===== DEBRIEF =====
+function getDayDate(dayIdx) {
+  return getDateOffset(getWeekMonday(), dayIdx);
+}
+
+function findMatchingActivity(dayIdx, type) {
+  const dateStr = getDayDate(dayIdx).toISOString().split('T')[0];
+  return activities.find(a => {
+    const d = (a.start_date_local || a.start_date || '').split('T')[0];
+    if (d !== dateStr) return false;
+    const t = a.sport_type || a.type || '';
+    if (type === 'swim') return t === 'Swim';
+    if (type === 'bike') return ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+    if (type === 'run')  return ['Run','TrailRun'].includes(t);
+    if (type === 'brick') return ['Ride','VirtualRide','Run','TrailRun'].includes(t);
+    return false;
+  });
+}
+
+function openDebrief(dayIdx) {
+  if (!currentPlan) return;
+  const day = currentPlan.days[dayIdx];
+  if (!day || day.type === 'rest') return;
+  const activity = findMatchingActivity(dayIdx, day.type);
+  const mv = getMetrics();
+  document.getElementById('debriefModalTitle').textContent = 'Débrief — ' + day.title;
+  document.getElementById('debriefModalBody').innerHTML = buildDebriefHTML(dayIdx, day, activity, mv);
+  document.getElementById('debriefModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDebrief() {
+  document.getElementById('debriefModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function buildDebriefHTML(dayIdx, day, act, mv) {
+  const ftp = mv.ftp || 0;
+  const hrMax = mv.hrMax || 185;
+  const hrRest = mv.hrRest || 55;
+  const hrr = hrMax - hrRest;
+  let html = '';
+
+  // 1 — Strava analysis
+  if (act) {
+    const plannedMin = parseDurationMin(day.duration);
+    const actualMin  = act.moving_time ? Math.round(act.moving_time / 60) : null;
+    const actualHR   = act.average_heartrate || null;
+    const actualMaxHR= act.max_heartrate || null;
+    const actualW    = act.average_watts || null;
+
+    let hrLo = Math.round(hrRest + 0.60*hrr), hrHi = Math.round(hrRest + 0.80*hrr);
+    if (day.key === 'bike_seuil' || day.key === 'run_tempo') { hrLo = Math.round(hrRest + 0.75*hrr); hrHi = Math.round(hrRest + 0.88*hrr); }
+    else if (day.key === 'swim_intv') { hrLo = Math.round(hrRest + 0.68*hrr); hrHi = Math.round(hrRest + 0.82*hrr); }
+
+    let wLo = ftp > 0 ? Math.round(ftp*0.65) : null, wHi = ftp > 0 ? Math.round(ftp*0.75) : null;
+    if (day.key === 'bike_seuil') { wLo = ftp > 0 ? Math.round(ftp*0.90) : null; wHi = ftp > 0 ? Math.round(ftp*1.05) : null; }
+    else if (day.key === 'bike_long') { wLo = ftp > 0 ? Math.round(ftp*0.70) : null; wHi = ftp > 0 ? Math.round(ftp*0.90) : null; }
+    else if (day.key === 'brick') { wLo = ftp > 0 ? Math.round(ftp*0.70) : null; wHi = ftp > 0 ? Math.round(ftp*0.85) : null; }
+
+    const cmpCls = (v, lo, hi) => { if (!v||!lo) return ''; const m=(hi-lo)*0.18; return v>=lo&&v<=hi?'cmp-ok':(v>=lo-m&&v<=hi+m)?'cmp-warn':'cmp-bad'; };
+    const sym = c => c==='cmp-ok'?'✓':c==='cmp-warn'?'≈':'✗';
+
+    const rows = [];
+    if (actualMin && plannedMin) { const c=cmpCls(actualMin,plannedMin*0.85,plannedMin*1.15); rows.push({m:'Durée',p:`${plannedMin}min`,a:`${actualMin}min`,c}); }
+    if (act.distance) { const km=(act.distance/1000).toFixed(1); rows.push({m:'Distance',p:day.desc.match(/[\d.]+km/)?.[0]||'—',a:`${km}km`,c:''}); }
+    if (actualHR) { const c=cmpCls(actualHR,hrLo,hrHi); rows.push({m:'FC moyenne',p:`${hrLo}-${hrHi} bpm`,a:`${Math.round(actualHR)} bpm`,c}); }
+    if (actualMaxHR) { const c=actualMaxHR>hrMax*0.97?'cmp-warn':'cmp-ok'; rows.push({m:'FC max',p:`< ${Math.round(hrMax*0.97)} bpm`,a:`${Math.round(actualMaxHR)} bpm`,c}); }
+    if (actualW && wLo) { const c=cmpCls(actualW,wLo,wHi); rows.push({m:'Puissance moy.',p:`${wLo}-${wHi}W`,a:`${Math.round(actualW)}W`,c}); }
+    if (act.average_speed && (day.type==='run'||day.type==='swim')) {
+      const s = day.type==='run' ? Math.round(1000/act.average_speed) : Math.round(100/act.average_speed);
+      const lbl = `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}/${day.type==='run'?'km':'100m'}`;
+      const tp = day.type==='run'&&mv.runPace703>0 ? fmtDecPace(mv.runPace703)+'/km' : day.type==='swim'&&mv.swimPace>0 ? fmtDecPace(mv.swimPace)+'/100m' : null;
+      rows.push({m:'Allure moy.',p:tp||'—',a:lbl,c:''});
+    }
+
+    const scores = rows.filter(r=>r.c).map(r=>r.c==='cmp-ok'?1:r.c==='cmp-warn'?0.65:0.3);
+    const score = scores.length ? Math.round(scores.reduce((s,v)=>s+v,0)/scores.length*100) : null;
+    const scoreCol = score>=80?'#06d6a0':score>=60?'#f77f00':'#ff4d6d';
+    const scoreBg  = score>=80?'rgba(6,214,160,0.12)':score>=60?'rgba(247,127,0,0.12)':'rgba(255,77,109,0.12)';
+
+    html += `<div class="debrief-section">
+      <div class="debrief-section-title">📊 Analyse Strava — ${act.name||'Activité'}</div>
+      ${score!==null?`<span class="score-badge" style="background:${scoreBg};color:${scoreCol};">${score}% de l'objectif atteint</span>`:''}
+      <table class="compare-table">
+        <thead><tr><th>Métrique</th><th>Prévu</th><th>Réalisé</th><th></th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td>${r.m}</td><td style="color:var(--muted)">${r.p}</td><td class="${r.c}">${r.a}</td><td class="${r.c}" style="font-size:0.8rem;">${r.c?sym(r.c):''}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  } else {
+    html += `<div class="debrief-section" style="text-align:center;">
+      <div class="debrief-section-title">📊 Analyse Strava</div>
+      <div style="color:var(--muted);font-size:0.82rem;">Aucune activité trouvée pour aujourd'hui.<br><span style="font-size:0.72rem;">Elle apparaîtra ici après synchronisation Strava.</span></div>
+    </div>`;
+  }
+
+  // 2 — Feeling form
+  const criteria = [
+    { id:'fatigue', label:'Fatigue générale', icon:'😴', max:5, hint:'1=fraîche, 5=épuisé·e' },
+    { id:'pain',    label:'Douleurs / gênes', icon:'🩹', max:5, hint:'1=aucune, 5=intense' },
+    { id:'moral',   label:'Moral / motivation', icon:'🧠', max:5, hint:'1=très motivé·e, 5=démotivé·e' },
+    { id:'sleep',   label:'Sommeil la nuit précédente', icon:'🌙', max:5, hint:'1=excellent, 5=très mauvais' },
+    { id:'rpe',     label:'Effort perçu (RPE)', icon:'💪', max:10, hint:'1=très facile, 10=effort maximal' },
+  ];
+  html += `<div class="debrief-section">
+    <div class="debrief-section-title">🌟 RESSENTI POST-SÉANCE</div>
+    ${criteria.map(c => `<div style="margin-bottom:0.9rem;">
+      <div style="font-size:0.8rem;margin-bottom:5px;">${c.icon} ${c.label} <span style="color:var(--muted);font-size:0.7rem;">(${c.hint})</span></div>
+      <div id="stars_${c.id}" style="display:flex;gap:${c.max===10?'3px':'5px'};flex-wrap:wrap;">
+        ${Array.from({length:c.max},(_,k)=>
+          c.max===10
+            ? `<span class="rpe-btn" onclick="setStar('${c.id}',${k+1},${c.max})" data-v="${k+1}">${k+1}</span>`
+            : `<span class="star" onclick="setStar('${c.id}',${k+1},${c.max})" data-v="${k+1}">★</span>`
+        ).join('')}
+      </div>
+    </div>`).join('')}
+    <div id="painLocDiv" style="display:none;margin-top:-0.35rem;margin-bottom:0.9rem;">
+      <input id="painLoc" type="text" placeholder="Localisation : ex. genou droit, tendon d'Achille..."
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.6rem;font-size:0.8rem;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+    </div>
+    <div>
+      <div style="font-size:0.8rem;margin-bottom:5px;">📝 Notes libres</div>
+      <textarea id="debriefNotes" rows="3" placeholder="Sensations, technique, météo, équipement..."
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.65rem;font-size:0.8rem;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;"></textarea>
+    </div>
+  </div>`;
+
+  // 3 — Auto advice (shown after first rating)
+  html += `<div id="debriefAdvice" class="debrief-section" style="display:none;">
+    <div class="debrief-section-title">💡 CONSEIL POUR LA PROCHAINE SÉANCE</div>
+    <div id="debriefAdviceText" style="font-size:0.82rem;line-height:1.7;"></div>
+  </div>`;
+
+  html += `<button onclick="submitDebrief(${dayIdx})" style="width:100%;background:var(--accent);color:white;border:none;border-radius:10px;padding:0.85rem;font-size:0.88rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;">💾 Sauvegarder le débrief</button>`;
+
+  return html;
+}
+
+function setStar(id, value, max) {
+  const el = document.getElementById('stars_' + id);
+  if (!el) return;
+  el.querySelectorAll(max === 10 ? '.rpe-btn' : '.star').forEach((s, i) => {
+    if (max === 10) {
+      s.classList.toggle('active', i < value);
+      s.style.background = i < value ? (value <= 3 ? '#06d6a0' : value <= 6 ? '#f77f00' : '#ff4d6d') : 'var(--surface)';
+      s.style.color = i < value ? 'white' : 'var(--text)';
+    } else {
+      s.classList.toggle('active', i < value);
+    }
+  });
+  el.dataset.value = value;
+  if (id === 'pain') document.getElementById('painLocDiv').style.display = value >= 3 ? 'block' : 'none';
+  updateDebriefAdvice();
+}
+
+function getStarVal(id) {
+  const el = document.getElementById('stars_' + id);
+  return el ? parseInt(el.dataset.value || '0') : 0;
+}
+
+function updateDebriefAdvice() {
+  const fatigue = getStarVal('fatigue');
+  const pain    = getStarVal('pain');
+  const moral   = getStarVal('moral');
+  const sleep   = getStarVal('sleep');
+  const rpe     = getStarVal('rpe');
+  if (!fatigue && !rpe) return;
+
+  const tips = [];
+  if (pain >= 3) tips.push(`⚠️ <strong>Douleur signalée</strong> — surveille l'évolution 48h. Si persistante, consulte un kiné ou médecin du sport. Privilégie une séance de récupération active demain.`);
+  if (sleep <= 2 && sleep > 0) tips.push(`😴 <strong>Sommeil insuffisant</strong> — priorise 7-9h avant ta prochaine séance intense. Envisage de déplacer la prochaine séance difficile.`);
+  if (fatigue >= 4) tips.push(`🔴 <strong>Fatigue élevée</strong> — réduis l'intensité de la prochaine séance de 15-20%. Soigne le repas de récupération ce soir (protéines + glucides).`);
+  if (rpe >= 9 && fatigue >= 3) tips.push(`⚡ <strong>Effort maximal détecté</strong> — récupération 48h minimum requise. Prochaine séance : Z1-Z2 uniquement, pas d'intensité.`);
+  if (rpe > 0 && rpe <= 4) tips.push(`💡 <strong>Séance très facile</strong> — tu avais encore des ressources. Vérifie que les cibles allure/puissance dans ton profil sont à jour.`);
+  if (moral <= 2 && moral > 0) tips.push(`🧠 <strong>Motivation en berne</strong> — c'est normal par cycles. Le cours collectif du mardi peut aider. Rappelle-toi ton objectif 70.3.`);
+  if (!tips.length) tips.push(`✅ <strong>Super séance !</strong> Continue sur cette lancée. Hydrate-toi bien et dors 8h ce soir pour maximiser les adaptations.`);
+
+  document.getElementById('debriefAdviceText').innerHTML = tips.join('<br><br>');
+  document.getElementById('debriefAdvice').style.display = 'block';
+}
+
+async function submitDebrief(dayIdx) {
+  if (!currentPlan) return;
+  const day = currentPlan.days[dayIdx];
+  const debrief = {
+    fatigue:       getStarVal('fatigue'),
+    pain:          getStarVal('pain'),
+    pain_location: document.getElementById('painLoc')?.value || '',
+    moral:         getStarVal('moral'),
+    sleep:         getStarVal('sleep'),
+    rpe:           getStarVal('rpe'),
+    notes:         document.getElementById('debriefNotes')?.value || '',
+    saved_at:      new Date().toISOString(),
+  };
+  const act = findMatchingActivity(dayIdx, day.type);
+  if (act) debrief.strava_activity_id = act.id;
+
+  await sbSaveWorkoutWithDebrief(dayIdx, day.title, day.type, debrief);
+
+  const btn = [...document.querySelectorAll('#debriefModalBody button')].at(-1);
+  if (btn) { btn.textContent = '✓ Sauvegardé !'; btn.style.background = 'var(--run)'; btn.disabled = true; }
+  setTimeout(() => closeDebrief(), 1500);
+}
+
+async function sbSaveWorkoutWithDebrief(dayIdx, title, type, debrief) {
+  const today = new Date().toISOString().split('T')[0];
+  localStorage.setItem(`done_${today}_${dayIdx}`, '1');
+  localStorage.setItem(`debrief_${today}_${dayIdx}`, JSON.stringify(debrief));
+  if (!_sb || !athlete) return;
+  try {
+    const { data: existing } = await _sb.from('workout_completions')
+      .select('id').eq('athlete_id', athlete.id).eq('date', today).eq('workout_type', type).maybeSingle();
+    const payload = { athlete_id: athlete.id, date: today, workout_title: title, workout_type: type, notes: JSON.stringify(debrief) };
+    if (existing) await _sb.from('workout_completions').update({ notes: JSON.stringify(debrief) }).eq('id', existing.id);
+    else await _sb.from('workout_completions').insert(payload);
+  } catch(e) { console.warn('sbSaveWorkoutWithDebrief', e); }
 }
 
 function disconnect() {
