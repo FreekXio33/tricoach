@@ -400,6 +400,7 @@
       <button id="regenBtn" onclick="generatePlan()" style="background:var(--surface2);color:var(--accent);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.85rem;font-size:0.8rem;cursor:pointer;font-family:'DM Sans',sans-serif;">↻ Régénérer</button>
     </div>
     <div id="planLoading" class="spinner" style="display:none;"></div>
+    <div id="adaptBanner" style="display:none;"></div>
     <div id="weekPlan" class="week-plan"></div>
     <div id="coachNote" style="margin-top:1rem;padding:0.85rem;background:var(--surface2);border-radius:10px;border:1px solid var(--border);font-size:0.82rem;color:var(--muted);line-height:1.6;display:none;"></div>
   </div>
@@ -518,6 +519,9 @@ let activities = [];
 let _sbSyncing = false; // prevent concurrent syncs
 let currentPlan = null;
 let currentAnalysis = null;
+let currentAdaptInfo = null;
+let standardPlanDays = null;
+let _showingStandard = false;
 
 // ===== INIT =====
 window.addEventListener('load', async () => {
@@ -818,53 +822,75 @@ function formatPace(mps) {
 }
 
 // ===== PLAN =====
-function generatePlan() {
+function renderWeekPlanDays(days) {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('weekPlan').innerHTML = days.map((d, i) => {
+    const isDone = localStorage.getItem(`done_${today}_${i}`) === '1';
+    const safeTitle = d.title.replace(/'/g,'').replace(/"/g,'');
+    const isAdapted = d.title.endsWith('🔄');
+    return `<div class="day-card ${d.type === 'rest' ? 'rest' : ''}" id="dayCard-${i}">
+      <div class="day-label">${d.day}</div>
+      <div class="day-stripe ${d.type}"></div>
+      <div class="day-info">
+        <div class="day-title">${d.title}</div>
+        <div class="day-desc">${d.desc}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+        ${d.duration ? `<div class="day-duration" style="${isAdapted?'color:var(--bike);':''}">${d.duration}</div>` : ''}
+        ${d.type !== 'rest' ? `
+          <button onclick="openSessionModal(${i})" style="background:rgba(199,125,255,0.1);color:var(--accent);border:1px solid rgba(199,125,255,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📋 Voir</button>
+          <button onclick="markDayDone(${i},'${safeTitle}','${d.type}')" id="doneBtn-${i}" style="background:${isDone?'var(--run)':'var(--surface2)'};color:${isDone?'white':'var(--muted)'};border:1px solid ${isDone?'transparent':'var(--border)'};border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">${isDone?'✓ Fait':'Valider'}</button>
+          <button onclick="openDebrief(${i})" id="debriefBtn-${i}" style="display:${isDone?'block':'none'};background:rgba(6,214,160,0.1);color:var(--run);border:1px solid rgba(6,214,160,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📝 Débrief</button>
+        ` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function generatePlan() {
   document.getElementById('planLoading').style.display = 'block';
   document.getElementById('weekPlan').innerHTML = '';
   document.getElementById('coachNote').style.display = 'none';
   document.getElementById('regenBtn').disabled = true;
+  const adaptBannerEl = document.getElementById('adaptBanner');
+  if (adaptBannerEl) adaptBannerEl.style.display = 'none';
+  _showingStandard = false;
 
-  setTimeout(() => {
-    try {
-      const analysis = analyzeAthleteData();
-      const plan = buildTrainingWeek(analysis);
-      currentPlan = plan;
-      currentAnalysis = analysis;
+  await new Promise(r => setTimeout(r, 80));
 
-      document.getElementById('planLoading').style.display = 'none';
-      document.getElementById('regenBtn').disabled = false;
+  try {
+    const analysis = analyzeAthleteData();
+    const debriefs  = await loadWeekDebriefs();
+    const adaptInfo = computeAdaptation(debriefs);
+    const basePlan  = buildTrainingWeek(analysis);
+    const plan      = adaptPlan(basePlan, adaptInfo, analysis);
 
-      document.getElementById('weekPlan').innerHTML = plan.days.map((d, i) => {
-        const today = new Date().toISOString().split('T')[0];
-        const isDone = localStorage.getItem(`done_${today}_${i}`) === '1';
-        const safeTitle = d.title.replace(/'/g,'').replace(/"/g,'');
-        return `<div class="day-card ${d.type === 'rest' ? 'rest' : ''}" id="dayCard-${i}">
-          <div class="day-label">${d.day}</div>
-          <div class="day-stripe ${d.type}"></div>
-          <div class="day-info">
-            <div class="day-title">${d.title}</div>
-            <div class="day-desc">${d.desc}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-            ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
-            ${d.type !== 'rest' ? `
-              <button onclick="openSessionModal(${i})" style="background:rgba(199,125,255,0.1);color:var(--accent);border:1px solid rgba(199,125,255,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📋 Voir</button>
-              <button onclick="markDayDone(${i},'${safeTitle}','${d.type}')" id="doneBtn-${i}" style="background:${isDone?'var(--run)':'var(--surface2)'};color:${isDone?'white':'var(--muted)'};border:1px solid ${isDone?'transparent':'var(--border)'};border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">${isDone?'✓ Fait':'Valider'}</button>
-              <button onclick="openDebrief(${i})" id="debriefBtn-${i}" style="display:${isDone?'block':'none'};background:rgba(6,214,160,0.1);color:var(--run);border:1px solid rgba(6,214,160,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📝 Débrief</button>
-            ` : ''}
-          </div>
-        </div>`;
-      }).join('');
+    currentPlan      = plan;
+    currentAnalysis  = analysis;
+    currentAdaptInfo = adaptInfo;
+    standardPlanDays = basePlan.days;
 
-      const noteEl = document.getElementById('coachNote');
-      noteEl.innerHTML = `<span style="color:var(--accent);font-weight:500;">📊 Analyse</span><br>${plan.note}`;
-      noteEl.style.display = 'block';
-    } catch(e) {
-      document.getElementById('planLoading').style.display = 'none';
-      document.getElementById('regenBtn').disabled = false;
-      document.getElementById('weekPlan').innerHTML = '<div class="error-box">Erreur de génération du programme.</div>';
+    document.getElementById('planLoading').style.display = 'none';
+    document.getElementById('regenBtn').disabled = false;
+
+    if (adaptBannerEl && adaptInfo.score !== null) {
+      adaptBannerEl.innerHTML = renderAdaptBanner(adaptInfo);
+      adaptBannerEl.style.display = 'block';
     }
-  }, 300);
+
+    renderWeekPlanDays(plan.days);
+
+    const noteEl = document.getElementById('coachNote');
+    noteEl.innerHTML = `<span style="color:var(--accent);font-weight:500;">📊 Analyse</span><br>${plan.note}`;
+    noteEl.style.display = 'block';
+
+    if (adaptInfo.adapted) saveAdaptationInfo(adaptInfo);
+  } catch(e) {
+    console.error('generatePlan error', e);
+    document.getElementById('planLoading').style.display = 'none';
+    document.getElementById('regenBtn').disabled = false;
+    document.getElementById('weekPlan').innerHTML = '<div class="error-box">Erreur de génération du programme.</div>';
+  }
 }
 
 function analyzeAthleteData() {
@@ -2646,6 +2672,252 @@ async function saveGoals() {
   const run  = parseFloat(document.getElementById('g_run')?.value)  || null;
   await sbSaveWeeklyGoals({ swim, bike, run });
   renderWeeklyGoalsWidget();
+}
+
+// ===== ADAPTATION ENGINE =====
+
+async function loadWeekDebriefs() {
+  const since = getDateOffset(new Date(), -8).toISOString().split('T')[0];
+
+  if (_sb && _sbReady && athlete) {
+    try {
+      const { data, error } = await _sb.from('workout_completions')
+        .select('date, workout_type, notes')
+        .eq('athlete_id', athlete.id)
+        .gte('date', since)
+        .order('date', { ascending: false });
+      if (!error && data) {
+        const parsed = data.filter(r => r.notes).map(r => {
+          try { return { ...JSON.parse(r.notes), workout_type: r.workout_type, date: r.date }; }
+          catch { return null; }
+        }).filter(Boolean);
+        if (parsed.length > 0) return parsed;
+      }
+    } catch(e) { /* fall through to localStorage */ }
+  }
+
+  // localStorage fallback — scan debrief_YYYY-MM-DD_dayIdx keys
+  const result = [];
+  for (let d = 0; d < 9; d++) {
+    const dateStr = getDateOffset(new Date(), -d).toISOString().split('T')[0];
+    for (let i = 0; i < 7; i++) {
+      const raw = localStorage.getItem(`debrief_${dateStr}_${i}`);
+      if (raw) {
+        try { result.push({ ...JSON.parse(raw), date: dateStr }); }
+        catch {}
+      }
+    }
+  }
+  return result;
+}
+
+function computeAdaptation(debriefs) {
+  if (!debriefs.length) {
+    return { score: null, adapted: false, adaptations: [], message: null, injuries: null, sleepAlert: false, debriefCount: 0 };
+  }
+
+  const avg = key => {
+    const v = debriefs.filter(d => d[key] > 0);
+    return v.length ? v.reduce((s, d) => s + d[key], 0) / v.length : 0;
+  };
+
+  const fatigue = avg('fatigue'); // 1=fresh 5=exhausted
+  const moral   = avg('moral');   // 1=motivated 5=unmotivated
+  const sleep   = avg('sleep');   // 1=excellent 5=terrible
+  const rpe     = avg('rpe');     // 1-10
+
+  // Convert to 0-100 subscores (higher = better form)
+  const fatigueScore = fatigue > 0 ? Math.round((5 - fatigue) / 4 * 100) : 60;
+  const moralScore   = moral   > 0 ? Math.round((5 - moral)   / 4 * 100) : 60;
+  const sleepScore   = sleep   > 0 ? Math.round((5 - sleep)   / 4 * 100) : 60;
+  const rpeScore     = rpe     > 0 ? Math.round(Math.max(0, (9 - rpe) / 9 * 100)) : 60;
+
+  const score = Math.min(100, Math.max(0, Math.round(
+    fatigueScore * 0.35 + moralScore * 0.20 + sleepScore * 0.25 + rpeScore * 0.20
+  )));
+
+  // Injury detection from pain_location text
+  const painEntries = debriefs.filter(d => d.pain >= 3);
+  let injuries = null;
+  if (painEntries.length > 0) {
+    const locs = painEntries.map(d => (d.pain_location || '').toLowerCase()).join(' ');
+    if (/genou|cheville|pied|tibia|fasciite|mollet/.test(locs))         injuries = 'lower_run';
+    else if (/épaule|shoulder|dos|nuque|cervical|coude/.test(locs))     injuries = 'upper_swim';
+    else if (/hanche|psoas|ilio|fessier|adduct/.test(locs))             injuries = 'lower_general';
+    else if (painEntries.length >= 2)                                    injuries = 'general';
+  }
+
+  // Sleep alert: 3+ nights with bad sleep (sleep >= 4/5)
+  const sleepAlert = debriefs.filter(d => d.sleep >= 4).length >= 3;
+
+  const adaptations = [];
+  let adapted = false;
+
+  if (score < 40) {
+    adapted = true;
+    adaptations.push('Volume réduit de 20% (fatigue détectée)');
+    adaptations.push('Séances intenses remplacées par endurance Z2');
+    if (debriefs.length >= 4) adaptations.push('1 jour de repos supplémentaire ajouté');
+  } else if (score > 70) {
+    adapted = true;
+    adaptations.push('Volume augmenté de 10% (super forme)');
+    adaptations.push('+1 intervalle sur les séances fractionnées');
+  }
+
+  if (injuries === 'lower_run')   { adapted = true; adaptations.push('Courses → vélo/natation (douleur bas du corps)'); }
+  else if (injuries === 'upper_swim') { adapted = true; adaptations.push('Natation allégée (gêne épaule/dos)'); }
+  else if (injuries === 'lower_general') { adapted = true; adaptations.push('Intensités réduites 15% (douleur hanche/bassin)'); }
+  else if (injuries === 'general')    { adapted = true; adaptations.push('Intensités réduites 15% (douleurs signalées)'); }
+
+  if (sleepAlert) { adapted = true; adaptations.push('⚠️ Intensités réduites — manque de sommeil chronique (3+ nuits)'); }
+
+  const message = score < 40 ? 'Semaine de récupération conseillée'
+                : score > 70 ? 'Tu es en forme — on charge !'
+                : adapted     ? 'Programme ajusté à ton état'
+                : null;
+
+  return { score, fatigueScore, moralScore, sleepScore, rpeScore, fatigue, moral, sleep, rpe,
+           injuries, sleepAlert, adaptations, adapted, message, debriefCount: debriefs.length };
+}
+
+function scaleDuration(durStr, factor) {
+  const min = parseDurationMin(durStr);
+  if (!min) return durStr;
+  return fmtDur(Math.round(min * factor));
+}
+
+function adaptPlan(plan, adaptInfo, analysis) {
+  if (!adaptInfo || !adaptInfo.adapted) return plan;
+  const { score, injuries, sleepAlert } = adaptInfo;
+
+  const adaptedDays = plan.days.map((day, i) => {
+    let d = { ...day };
+
+    // INJURY: lower body running pain → swap run sessions for bike/swim
+    if (injuries === 'lower_run' && ['run_z2','run_tempo','run_long','brick'].includes(d.key)) {
+      const isLong = d.key === 'run_long';
+      d = { ...d, key: isLong ? 'bike_long' : 'bike_z2', type: 'bike',
+        title: (isLong ? 'Vélo — Longue sortie' : 'Vélo — Z2') + ' 🔄',
+        desc: d.desc + ' — Adapté : course remplacée (douleur bas du corps signalée).' };
+    }
+
+    // INJURY: upper body swim pain → downgrade swim_intv → swim_tech
+    if (injuries === 'upper_swim' && d.key === 'swim_intv') {
+      d = { ...d, key: 'swim_tech', title: 'Natation — Technique 🔄',
+        desc: d.desc + ' — Adapté : intervalles supprimés (gêne épaule/dos).' };
+    }
+
+    // INJURY: general → reduce intensity -15%
+    if ((injuries === 'general' || injuries === 'lower_general') && !['rest','rest_act'].includes(d.key) && d.duration) {
+      d = { ...d, duration: scaleDuration(d.duration, 0.85),
+        desc: d.desc + ' — Intensité réduite 15% (douleurs signalées).' };
+    }
+
+    // SLEEP ALERT → reduce volume -15%
+    if (sleepAlert && !['rest','rest_act'].includes(d.key) && d.duration) {
+      d = { ...d, duration: scaleDuration(d.duration, 0.85) };
+    }
+
+    // LOW SCORE (<40) → recovery week
+    if (score < 40) {
+      const swaps = { bike_seuil: ['bike_z2','bike','Vélo — Récupération 🔄'], run_tempo: ['run_z2','run','Course — Récupération 🔄'],
+                      swim_intv: ['swim_tech','swim','Natation — Technique 🔄'], brick: ['run_z2','run','Course — Récupération 🔄'] };
+      if (swaps[d.key]) {
+        const [nk, nt, ntitle] = swaps[d.key];
+        d = { ...d, key: nk, type: nt, title: ntitle, desc: 'Séance intense remplacée — récupération prioritaire cette semaine.' };
+      }
+      // Extra rest day on Friday if enough debriefs
+      if (adaptInfo.debriefCount >= 4 && i === 4 && d.type !== 'rest') {
+        d = { ...d, key: 'rest', type: 'rest', title: 'Repos supplémentaire 🔄', duration: '', desc: 'Jour de repos ajouté — récupération prioritaire.' };
+      }
+      // Reduce all non-rest volume -20%
+      if (!['rest','rest_act'].includes(d.key) && d.duration) {
+        d = { ...d, duration: scaleDuration(d.duration, 0.80) };
+      }
+    }
+
+    // HIGH SCORE (>70) → add volume +10% + note on hard sessions
+    if (score > 70) {
+      if (!['rest','rest_act','swim_group'].includes(d.key) && d.duration) {
+        d = { ...d, duration: scaleDuration(d.duration, 1.10) };
+      }
+      if (['bike_seuil','run_tempo','swim_intv'].includes(d.key)) {
+        d = { ...d, desc: d.desc + ' — 🔥 +1 intervalle ajouté (super forme).' };
+      }
+    }
+
+    return d;
+  });
+
+  return { ...plan, days: adaptedDays };
+}
+
+function renderAdaptBanner(info) {
+  const { score, adapted, adaptations, message, sleepAlert, debriefCount,
+          fatigueScore, moralScore, sleepScore, rpeScore } = info;
+  if (score === null) return '';
+
+  const col  = score < 40 ? '#ff4d6d' : score > 70 ? '#06d6a0' : '#f77f00';
+  const bg   = score < 40 ? 'rgba(255,77,109,0.07)' : score > 70 ? 'rgba(6,214,160,0.07)' : 'rgba(247,127,0,0.07)';
+  const icon = score < 40 ? '🔴' : score > 70 ? '🟢' : '🟡';
+  const label = message || (score >= 40 && score <= 70 && !adapted ? 'Forme correcte — programme standard' : '');
+
+  const subScores = [
+    { l:'Fatigue', v: fatigueScore }, { l:'Moral', v: moralScore },
+    { l:'Sommeil', v: sleepScore  }, { l:'RPE',   v: rpeScore   },
+  ].filter(s => s.v !== 60); // only show if meaningful (not default 60)
+
+  const subHtml = subScores.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+    ${subScores.map(s => {
+      const c = s.v < 40 ? '#ff4d6d' : s.v > 70 ? '#06d6a0' : '#f77f00';
+      return `<div style="font-size:0.68rem;color:var(--muted);">${s.l} <strong style="color:${c};">${s.v}</strong></div>`;
+    }).join('')}
+  </div>` : '';
+
+  const adaptList = adaptations.length ? `<div style="font-size:0.72rem;color:var(--muted);border-top:1px solid ${col}25;padding-top:0.45rem;margin-top:0.45rem;line-height:1.7;">
+    ${adaptations.map(a => `<div>→ ${a}</div>`).join('')}
+    ${sleepAlert ? '<div style="color:var(--danger);font-weight:600;margin-top:3px;">⚠️ Consulte un médecin du sport si le manque de sommeil persiste.</div>' : ''}
+  </div>` : '';
+
+  const toggleBtn = adapted ? `<button onclick="toggleStandardPlan()" id="stdPlanBtn"
+    style="margin-top:0.5rem;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:0.72rem;color:var(--muted);font-family:'DM Sans',sans-serif;cursor:pointer;">
+    Voir programme standard</button>` : '';
+
+  return `<div style="background:${bg};border:1px solid ${col}35;border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.85rem;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div style="flex:1;">
+        <div style="font-size:0.82rem;font-weight:600;color:${col};">${icon} ${label}</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">Basé sur ${debriefCount} débrief${debriefCount>1?'s':''}</div>
+        ${subHtml}
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${col};line-height:1;margin-left:12px;">${score}</div>
+    </div>
+    ${adaptList}
+    ${toggleBtn}
+  </div>`;
+}
+
+function toggleStandardPlan() {
+  _showingStandard = !_showingStandard;
+  const btn = document.getElementById('stdPlanBtn');
+  if (btn) btn.textContent = _showingStandard ? '← Programme adapté' : 'Voir programme standard';
+  renderWeekPlanDays(_showingStandard ? standardPlanDays : currentPlan.days);
+}
+
+async function saveAdaptationInfo(adaptInfo) {
+  const monday = getWeekMonday();
+  const weekStart = monday.toISOString().split('T')[0];
+  const payload = JSON.stringify({
+    forme_score: adaptInfo.score, adapted: adaptInfo.adapted,
+    adaptations: adaptInfo.adaptations, injuries: adaptInfo.injuries,
+    sleep_alert: adaptInfo.sleepAlert, debrief_count: adaptInfo.debriefCount,
+  });
+  localStorage.setItem(`adapt_${weekStart}`, payload);
+  if (!_sb || !_sbReady || !athlete) return;
+  try {
+    const goals = await sbLoadWeeklyGoals() || {};
+    await sbSaveWeeklyGoals({ ...goals, notes: payload });
+  } catch(e) { console.warn('saveAdaptationInfo', e); }
 }
 
 // ===== SESSION DETAIL =====
