@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TriCoach AI — Ton coach triathlon</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #0a0c10;
@@ -206,6 +207,7 @@
     <button class="tab active" onclick="switchTab('dashboard',this)">📊 Tableau de bord</button>
     <button class="tab" onclick="switchTab('programme',this)">📅 Programme</button>
     <button class="tab" onclick="switchTab('coach',this)">💡 Conseils</button>
+    <button class="tab" onclick="switchTab('progression',this)">📈 Progression</button>
     <button class="tab" onclick="switchTab('profil',this)">👤 Profil</button>
   </div>
 
@@ -284,6 +286,35 @@
       <div style="font-size:0.78rem;color:var(--muted);">Analyse automatique de tes données Strava</div>
     </div>
     <div id="coachAdvice"></div>
+  </div>
+
+  <!-- PROGRESSION -->
+  <div id="tab-progression" class="page">
+    <div style="margin-bottom:1rem;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Progression</div>
+      <div style="font-size:0.78rem;color:var(--muted);">Volume &amp; allures sur 8 semaines</div>
+    </div>
+    <div id="progLoading" class="spinner" style="display:none;"></div>
+    <div id="progCharts">
+      <div style="margin-bottom:1.5rem;">
+        <div class="section-title" style="margin-bottom:0.6rem;color:var(--swim);">🏊 Natation</div>
+        <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem;">
+          <canvas id="chartSwim" height="140"></canvas>
+        </div>
+      </div>
+      <div style="margin-bottom:1.5rem;">
+        <div class="section-title" style="margin-bottom:0.6rem;color:var(--bike);">🚴 Vélo</div>
+        <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem;">
+          <canvas id="chartBike" height="140"></canvas>
+        </div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <div class="section-title" style="margin-bottom:0.6rem;color:var(--run);">🏃 Course</div>
+        <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem;">
+          <canvas id="chartRun" height="140"></canvas>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- PROFIL -->
@@ -380,8 +411,8 @@ async function loadApp(token) {
 
 async function fetchActivities(token) {
   try {
-    // Get activities from last 4 weeks
-    const since = Math.floor(Date.now()/1000) - 28*86400;
+    // Get activities from last 8 weeks (for progression charts)
+    const since = Math.floor(Date.now()/1000) - 56*86400;
     const res = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -606,9 +637,12 @@ function analyzeAthleteData() {
   const isRun  = t => ['Run','TrailRun'].includes(t);
 
   const now = new Date();
-  const swimActs = activities.filter(a => isSwim(getType(a)));
-  const bikeActs = activities.filter(a => isBike(getType(a)));
-  const runActs  = activities.filter(a => isRun(getType(a)));
+  // Restrict to last 28 days for the 4-week stats
+  const cutoff28 = new Date(now - 28 * 86400000);
+  const recent = activities.filter(a => new Date(a.start_date) >= cutoff28);
+  const swimActs = recent.filter(a => isSwim(getType(a)));
+  const bikeActs = recent.filter(a => isBike(getType(a)));
+  const runActs  = recent.filter(a => isRun(getType(a)));
 
   // 4-week average weekly volumes
   const avgSwimKm  = swimActs.reduce((s,a) => s + a.distance, 0) / 4000;
@@ -630,7 +664,7 @@ function analyzeAthleteData() {
 
   // Training days histogram (0=Sun … 6=Sat)
   const dayCount = [0,0,0,0,0,0,0];
-  activities.forEach(a => dayCount[new Date(a.start_date_local || a.start_date).getDay()]++);
+  recent.forEach(a => dayCount[new Date(a.start_date_local || a.start_date).getDay()]++);
 
   // Fitness levels (0=débutant, 1=intermédiaire, 2=avancé)
   const swimPace100  = avgSwimSpeed > 0 ? 100 / avgSwimSpeed : 999;
@@ -876,6 +910,85 @@ function renderProfil() {
     </div>`;
 }
 
+// ===== PROGRESSION CHARTS =====
+let progCharts = {};
+function renderProgressionCharts() {
+  const getType = a => a.sport_type || a.type || '';
+  const isSwim = t => t === 'Swim';
+  const isBike = t => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+  const isRun  = t => ['Run','TrailRun'].includes(t);
+  const now = new Date();
+
+  // Build 8 weekly bins (oldest first)
+  const bins = Array.from({length: 8}, (_, i) => {
+    const weeksAgo = 7 - i;
+    const end = new Date(now); end.setDate(now.getDate() - weeksAgo * 7); end.setHours(23,59,59,999);
+    const start = new Date(end); start.setDate(end.getDate() - 6); start.setHours(0,0,0,0);
+    const d = start.getDate(), m = start.getMonth() + 1;
+    return { start, end, label: `${d}/${m < 10 ? '0'+m : m}`, swimKm:0, bikeKm:0, runKm:0, swimSpeeds:[], bikeSpeeds:[], runSpeeds:[] };
+  });
+
+  activities.forEach(a => {
+    const d = new Date(a.start_date);
+    const t = getType(a);
+    bins.forEach(b => {
+      if (d < b.start || d > b.end) return;
+      if (isSwim(t)) { b.swimKm += a.distance/1000; if (a.average_speed > 0) b.swimSpeeds.push(a.average_speed); }
+      else if (isBike(t)) { b.bikeKm += a.distance/1000; if (a.average_speed > 0) b.bikeSpeeds.push(a.average_speed); }
+      else if (isRun(t))  { b.runKm  += a.distance/1000; if (a.average_speed > 0) b.runSpeeds.push(a.average_speed); }
+    });
+  });
+
+  const labels = bins.map(b => b.label);
+  const avg = arr => arr.length ? arr.reduce((s,v) => s+v, 0) / arr.length : null;
+  // Convert speed to display value: swim→min/100m decimal, bike→km/h, run→min/km decimal
+  const toSwimPace = s => s ? +(100 / s / 60).toFixed(2) : null;   // e.g. 1.10 = 1:06/100m
+  const toBikePace = s => s ? +(s * 3.6).toFixed(1) : null;
+  const toRunPace  = s => s ? +(1000 / s / 60).toFixed(2) : null;  // e.g. 4.50 = 4:30/km
+
+  const chartDefaults = {
+    responsive: true,
+    plugins: { legend: { display: false }, tooltip: { callbacks: {} } },
+    scales: {
+      x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      y:  { position: 'left',  ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+      y2: { position: 'right', ticks: { color: '#555', font: { size: 9 } }, grid: { display: false } }
+    }
+  };
+
+  const mkChart = (id, color, volData, paceData, volLabel, paceLabel, paceFormatter) => {
+    if (progCharts[id]) { progCharts[id].destroy(); }
+    const cfg = JSON.parse(JSON.stringify(chartDefaults));
+    cfg.scales.y.title  = { display: true, text: volLabel,  color: '#555', font: { size: 9 } };
+    cfg.scales.y2.title = { display: true, text: paceLabel, color: '#555', font: { size: 9 } };
+    cfg.plugins.tooltip.callbacks.label = ctx => {
+      if (ctx.dataset.label === 'pace') return paceFormatter(ctx.raw);
+      return ctx.raw !== null ? ctx.raw.toFixed(1) + ' km' : '—';
+    };
+    progCharts[id] = new Chart(document.getElementById(id), {
+      data: {
+        labels,
+        datasets: [
+          { type: 'bar',  label: 'vol',  data: volData,  backgroundColor: color + '55', borderColor: color, borderWidth: 1, borderRadius: 3, yAxisID: 'y' },
+          { type: 'line', label: 'pace', data: paceData, borderColor: color, borderWidth: 2, pointRadius: 3, pointBackgroundColor: color, tension: 0.3, yAxisID: 'y2', spanGaps: true }
+        ]
+      },
+      options: cfg
+    });
+  };
+
+  const swimVol   = bins.map(b => +b.swimKm.toFixed(2));
+  const swimPaces = bins.map(b => toSwimPace(avg(b.swimSpeeds)));
+  const bikeVol   = bins.map(b => +b.bikeKm.toFixed(1));
+  const bikePaces = bins.map(b => toBikePace(avg(b.bikeSpeeds)));
+  const runVol    = bins.map(b => +b.runKm.toFixed(2));
+  const runPaces  = bins.map(b => toRunPace(avg(b.runSpeeds)));
+
+  mkChart('chartSwim', '#00b4d8', swimVol, swimPaces, 'km', 'min/100m', v => v ? v.toFixed(2) + ' min/100m' : '—');
+  mkChart('chartBike', '#f77f00', bikeVol, bikePaces, 'km', 'km/h',     v => v ? v.toFixed(1) + ' km/h' : '—');
+  mkChart('chartRun',  '#06d6a0', runVol,  runPaces,  'km', 'min/km',   v => v ? v.toFixed(2) + ' min/km' : '—');
+}
+
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -883,6 +996,7 @@ function switchTab(name, el) {
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'programme' && !document.getElementById('weekPlan').innerHTML) generatePlan();
   if (name === 'coach') renderCoachAdvice();
+  if (name === 'progression') renderProgressionCharts();
   if (name === 'profil') renderProfil();
 }
 
