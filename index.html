@@ -6,6 +6,11 @@
 <title>TriCoach AI — Ton coach triathlon</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#c77dff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TriCoach">
 <style>
   :root {
     --bg: #0a0c10;
@@ -407,7 +412,11 @@ async function loadApp(token) {
   document.getElementById('semiDaysLeft').textContent = Math.ceil((semiDate - new Date()) / 86400000);
 
   await fetchActivities(token.access_token);
+  checkMorningNotification();
 }
+
+// Register service worker early
+initServiceWorker();
 
 async function fetchActivities(token) {
   try {
@@ -903,10 +912,15 @@ function renderProfil() {
         </div>
       </div>
     </div>
-    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);">
+    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
       <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">OBJECTIF PRINCIPAL</div>
       <div style="font-size:0.95rem;font-weight:500;">🏆 Triathlon 70.3</div>
       <div style="font-size:0.8rem;color:var(--muted);margin-top:4px;">Juin 2026 · Entraînement en cours</div>
+    </div>
+    <div id="notifCard" style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">RAPPELS D'ENTRAÎNEMENT</div>
+      <div style="font-size:0.84rem;margin-bottom:0.75rem;line-height:1.5;">Reçois une notification chaque matin à 7h avec ta séance du jour.<br><span style="font-size:0.72rem;color:var(--muted);">Sur iPhone : ajoute l'app à l'écran d'accueil (Partager → Sur l'écran d'accueil) puis active.</span></div>
+      <button id="notifBtn" onclick="setupNotifications()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:0.6rem 1.2rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">🔔 Activer les rappels</button>
     </div>`;
 }
 
@@ -997,7 +1011,82 @@ function switchTab(name, el) {
   if (name === 'programme' && !document.getElementById('weekPlan').innerHTML) generatePlan();
   if (name === 'coach') renderCoachAdvice();
   if (name === 'progression') renderProgressionCharts();
-  if (name === 'profil') renderProfil();
+  if (name === 'profil') { renderProfil(); updateNotifBtn(); }
+}
+
+// ===== NOTIFICATIONS =====
+function initServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+}
+
+async function setupNotifications() {
+  if (!('Notification' in window)) {
+    alert('Les notifications ne sont pas supportées par ce navigateur.');
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted') {
+    localStorage.setItem('notif_enabled', 'true');
+    updateNotifBtn();
+    new Notification('TriCoach — Rappels activés ✅', {
+      body: 'Tu recevras un rappel chaque matin à 7h avec ta séance du jour.',
+      icon: '/icon-192.png'
+    });
+  } else {
+    alert('Permission refusée. Active les notifications dans les réglages du navigateur.');
+  }
+}
+
+function updateNotifBtn() {
+  const btn = document.getElementById('notifBtn');
+  if (!btn) return;
+  const enabled = localStorage.getItem('notif_enabled') === 'true' && Notification.permission === 'granted';
+  if (enabled) {
+    btn.textContent = '✅ Rappels activés';
+    btn.style.background = 'var(--surface)';
+    btn.style.border = '1px solid var(--border)';
+    btn.style.color = 'var(--run)';
+    btn.onclick = () => { localStorage.removeItem('notif_enabled'); updateNotifBtn(); };
+  } else {
+    btn.textContent = '🔔 Activer les rappels';
+    btn.style.background = 'var(--accent)';
+    btn.style.border = 'none';
+    btn.style.color = 'white';
+    btn.onclick = setupNotifications;
+  }
+}
+
+function checkMorningNotification() {
+  if (Notification.permission !== 'granted') return;
+  if (localStorage.getItem('notif_enabled') !== 'true') return;
+  const now = new Date();
+  const hour = now.getHours();
+  if (hour < 6 || hour >= 10) return;
+  const today = now.toDateString();
+  if (localStorage.getItem('last_notif') === today) return;
+  localStorage.setItem('last_notif', today);
+
+  // Determine today's workout from plan template
+  const dayIdx = (now.getDay() + 6) % 7; // Mon=0 … Sun=6
+  const planByPhase = {
+    base:  ['Natation — Technique','Course — Endurance Z2','Vélo — Endurance Z2','Natation — Intervalles','Repos','Vélo — Longue sortie','Course — Endurance Z2'],
+    build: ['Natation — Technique','Course — Allure course','Vélo — Seuil','Natation — Intervalles','Course — Endurance Z2','Enchaînement Vélo→Course','Course — Longue sortie'],
+    peak:  ['Natation — Intervalles','Course — Allure course','Vélo — Longue sortie','Natation — Technique','Récupération active','Enchaînement Vélo→Course','Course — Longue sortie'],
+  };
+  // Estimate phase from stored activities count (rough)
+  let phase = 'build';
+  if (activities.length) {
+    const a = analyzeAthleteData();
+    phase = a.phase;
+  }
+  const seance = planByPhase[phase][dayIdx];
+  new Notification('TriCoach — Programme du jour 🏊🚴🏃', {
+    body: seance === 'Repos' ? '😴 Repos aujourd\'hui — récupère bien !' : `💪 ${seance} au programme. Bonne séance !`,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png'
+  });
 }
 
 function disconnect() {

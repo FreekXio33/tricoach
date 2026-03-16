@@ -1,0 +1,14 @@
+{
+  "name": "TriCoach AI",
+  "short_name": "TriCoach",
+  "description": "Ton coach triathlon personnalisé",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0c10",
+  "theme_color": "#c77dff",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
