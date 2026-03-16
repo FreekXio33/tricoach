@@ -358,6 +358,7 @@
     <div id="dashContent" style="display:none;">
       <div id="weatherWidget"></div>
       <div id="sessionDuJourWidget"></div>
+      <div id="formeGarminWidget"></div>
       <div class="goal-banner">
         <div class="goal-icon">🏆</div>
         <div>
@@ -708,6 +709,7 @@ function renderDashboard() {
   renderFormeDuJour();
   renderWeatherWidget();
   renderSessionDuJour();
+  renderFormeGarmin();
 
   // Streak
   const streak = calcStreak();
@@ -904,7 +906,7 @@ async function generatePlan() {
   try {
     const analysis = analyzeAthleteData();
     const debriefs  = await loadWeekDebriefs();
-    const adaptInfo = computeAdaptation(debriefs);
+    const adaptInfo = await computeAdaptation(debriefs);
     const basePlan  = buildTrainingWeek(analysis);
     const plan      = adaptPlan(basePlan, adaptInfo, analysis);
 
@@ -2422,7 +2424,18 @@ CREATE TABLE IF NOT EXISTS weekly_goals (
   swim_km DECIMAL, bike_km DECIMAL, run_km DECIMAL, notes TEXT,
   UNIQUE(athlete_id, week_start)
 );
-ALTER TABLE weekly_goals DISABLE ROW LEVEL SECURITY;`;
+ALTER TABLE weekly_goals DISABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS garmin_daily (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  athlete_id BIGINT, date DATE NOT NULL,
+  body_battery INTEGER, hrv INTEGER,
+  sleep_score INTEGER, sleep_duration DECIMAL,
+  stress INTEGER, spo2 DECIMAL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(athlete_id, date)
+);
+ALTER TABLE garmin_daily DISABLE ROW LEVEL SECURITY;`;
 
 async function initSupabase() {
   try {
@@ -2861,6 +2874,104 @@ async function validateFromDashboard(dayIdx, title, type) {
   setTimeout(() => renderSessionDuJour(), 300);
 }
 
+// ===== FORME GARMIN CARD =====
+
+async function renderFormeGarmin() {
+  const el = document.getElementById('formeGarminWidget');
+  if (!el) return;
+
+  if (!_sb || !_sbReady) { el.innerHTML = ''; return; }
+
+  const athleteId = athlete?.id;
+  if (!athleteId) { el.innerHTML = ''; return; }
+
+  // Fetch last 8 days of Garmin data
+  const today = new Date();
+  const d8ago = new Date(today); d8ago.setDate(today.getDate() - 8);
+  const dateStr = d8ago.toISOString().split('T')[0];
+
+  let rows = [];
+  try {
+    const { data } = await _sb.table('garmin_daily')
+      .select('date,body_battery,hrv,sleep_score,sleep_duration,stress,spo2')
+      .eq('athlete_id', athleteId)
+      .gte('date', dateStr)
+      .order('date', { ascending: false });
+    rows = data || [];
+  } catch(e) { el.innerHTML = ''; return; }
+
+  if (!rows.length) { el.innerHTML = ''; return; }
+
+  const latest = rows[0];
+
+  // Body Battery
+  const bb = latest.body_battery;
+  const bbCol = bb === null ? 'var(--muted)' : bb < 30 ? '#ff4d6d' : bb < 60 ? '#f77f00' : '#06d6a0';
+  const bbPct = bb !== null ? Math.min(100, Math.max(0, bb)) : 0;
+
+  // HRV trend vs 7-day avg
+  const hrv = latest.hrv;
+  const hrvVals = rows.slice(1, 8).map(r => r.hrv).filter(v => v !== null);
+  const hrv7avg = hrvVals.length ? Math.round(hrvVals.reduce((s,v) => s+v, 0) / hrvVals.length) : null;
+  let hrvTrend = '';
+  if (hrv !== null && hrv7avg !== null) {
+    if (hrv > hrv7avg + 3)       hrvTrend = '<span style="color:#06d6a0;font-size:0.85rem;">↑</span>';
+    else if (hrv < hrv7avg - 3)  hrvTrend = '<span style="color:#ff4d6d;font-size:0.85rem;">↓</span>';
+    else                          hrvTrend = '<span style="color:#f77f00;font-size:0.85rem;">→</span>';
+  }
+
+  // Sleep
+  const sleepDur  = latest.sleep_duration;
+  const sleepScore = latest.sleep_score;
+  const sleepDurFmt = sleepDur ? `${Math.floor(sleepDur)}h${Math.round((sleepDur % 1) * 60).toString().padStart(2,'0')}` : '—';
+  const sleepCol = sleepScore === null ? 'var(--muted)' : sleepScore < 50 ? '#ff4d6d' : sleepScore < 70 ? '#f77f00' : '#06d6a0';
+
+  // Recommendation
+  let recIcon, recText, recCol;
+  if (bb !== null && bb < 30) {
+    recIcon = '🛑'; recText = 'Repos recommandé'; recCol = '#ff4d6d';
+  } else if ((hrv !== null && hrv7avg !== null && hrv < hrv7avg - 5) || (sleepScore !== null && sleepScore < 50)) {
+    recIcon = '🟡'; recText = 'Séance légère conseillée'; recCol = '#f77f00';
+  } else {
+    recIcon = '✅'; recText = 'Séance intense OK'; recCol = '#06d6a0';
+  }
+
+  el.innerHTML = `
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:1rem;margin-bottom:1rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+      <div style="font-size:0.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">⌚ Forme Garmin</div>
+      <div style="font-size:0.68rem;color:var(--muted);">${latest.date}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.6rem;margin-bottom:0.75rem;">
+      <!-- Body Battery -->
+      <div style="background:var(--surface);border-radius:10px;padding:0.65rem 0.5rem;text-align:center;">
+        <div style="font-size:0.68rem;color:var(--muted);margin-bottom:5px;">Battery</div>
+        <div style="font-size:1.3rem;font-weight:700;color:${bbCol};">${bb !== null ? bb : '—'}</div>
+        <div style="height:4px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden;">
+          <div style="height:100%;width:${bbPct}%;background:${bbCol};border-radius:2px;transition:width 0.6s;"></div>
+        </div>
+      </div>
+      <!-- HRV -->
+      <div style="background:var(--surface);border-radius:10px;padding:0.65rem 0.5rem;text-align:center;">
+        <div style="font-size:0.68rem;color:var(--muted);margin-bottom:5px;">HRV</div>
+        <div style="font-size:1.3rem;font-weight:700;color:var(--accent);">${hrv !== null ? hrv : '—'}${hrvTrend}</div>
+        <div style="font-size:0.62rem;color:var(--muted);margin-top:4px;">${hrv7avg !== null ? `moy. 7j : ${hrv7avg}` : 'ms'}</div>
+      </div>
+      <!-- Sleep -->
+      <div style="background:var(--surface);border-radius:10px;padding:0.65rem 0.5rem;text-align:center;">
+        <div style="font-size:0.68rem;color:var(--muted);margin-bottom:5px;">Sommeil</div>
+        <div style="font-size:1.3rem;font-weight:700;color:${sleepCol};">${sleepDurFmt}</div>
+        <div style="font-size:0.62rem;color:${sleepCol};margin-top:4px;">${sleepScore !== null ? `score ${sleepScore}` : ''}</div>
+      </div>
+    </div>
+    <!-- Recommendation -->
+    <div style="background:${recCol}15;border:1px solid ${recCol}30;border-radius:8px;padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">
+      <span style="font-size:1rem;">${recIcon}</span>
+      <span style="font-size:0.8rem;font-weight:600;color:${recCol};">${recText}</span>
+    </div>
+  </div>`;
+}
+
 // ===== DRAG & DROP / SCHEDULE =====
 
 function dragStart(e, idx) {
@@ -3078,9 +3189,37 @@ async function loadWeekDebriefs() {
   return result;
 }
 
-function computeAdaptation(debriefs) {
-  if (!debriefs.length) {
-    return { score: null, adapted: false, adaptations: [], message: null, injuries: null, sleepAlert: false, debriefCount: 0 };
+async function computeAdaptation(debriefs) {
+  // ── Fetch latest Garmin data ──────────────────────────────────────────────
+  let garmin = null;
+  let garmin7 = [];
+  if (_sb && _sbReady && athlete?.id) {
+    try {
+      const d8ago = new Date(); d8ago.setDate(d8ago.getDate() - 8);
+      const { data } = await _sb.table('garmin_daily')
+        .select('date,body_battery,hrv,sleep_score,sleep_duration,stress')
+        .eq('athlete_id', athlete.id)
+        .gte('date', d8ago.toISOString().split('T')[0])
+        .order('date', { ascending: false });
+      if (data && data.length) { garmin = data[0]; garmin7 = data; }
+    } catch(e) { /* ignore */ }
+  }
+
+  // ── Garmin-based flags ────────────────────────────────────────────────────
+  const bb = garmin?.body_battery ?? null;
+  const gHrv = garmin?.hrv ?? null;
+  const hrv7vals = garmin7.slice(1,8).map(r=>r.hrv).filter(v=>v!==null);
+  const hrv7avg = hrv7vals.length ? hrv7vals.reduce((s,v)=>s+v,0)/hrv7vals.length : null;
+  const gSleepScore = garmin?.sleep_score ?? null;
+
+  const garminRestForced   = bb !== null && bb < 30;
+  const garminLightForced  = !garminRestForced && (
+    (gHrv !== null && hrv7avg !== null && gHrv < hrv7avg - 5) ||
+    (gSleepScore !== null && gSleepScore < 50)
+  );
+
+  if (!debriefs.length && !garmin) {
+    return { score: null, adapted: false, adaptations: [], message: null, injuries: null, sleepAlert: false, debriefCount: 0, garmin };
   }
 
   const avg = key => {
@@ -3096,11 +3235,18 @@ function computeAdaptation(debriefs) {
   // Convert to 0-100 subscores (higher = better form)
   const fatigueScore = fatigue > 0 ? Math.round((5 - fatigue) / 4 * 100) : 60;
   const moralScore   = moral   > 0 ? Math.round((5 - moral)   / 4 * 100) : 60;
-  const sleepScore   = sleep   > 0 ? Math.round((5 - sleep)   / 4 * 100) : 60;
+  const sleepScoreM  = sleep   > 0 ? Math.round((5 - sleep)   / 4 * 100) : 60;
   const rpeScore     = rpe     > 0 ? Math.round(Math.max(0, (9 - rpe) / 9 * 100)) : 60;
 
+  // Garmin overrides manual subscores when available
+  const garminFatigueScore = bb !== null ? Math.min(100, Math.round(bb * 1.0)) : null;  // bb 0-100 direct
+  const garminSleepScore   = gSleepScore !== null ? gSleepScore : null;                 // 0-100 direct
+
+  const finalFatigueScore = garminFatigueScore !== null ? Math.round(garminFatigueScore * 0.6 + fatigueScore * 0.4) : fatigueScore;
+  const finalSleepScore   = garminSleepScore   !== null ? Math.round(garminSleepScore   * 0.6 + sleepScoreM   * 0.4) : sleepScoreM;
+
   const score = Math.min(100, Math.max(0, Math.round(
-    fatigueScore * 0.35 + moralScore * 0.20 + sleepScore * 0.25 + rpeScore * 0.20
+    finalFatigueScore * 0.35 + moralScore * 0.20 + finalSleepScore * 0.25 + rpeScore * 0.20
   )));
 
   // Injury detection from pain_location text
@@ -3120,7 +3266,21 @@ function computeAdaptation(debriefs) {
   const adaptations = [];
   let adapted = false;
 
-  if (score < 40) {
+  // Garmin hard override: Battery < 30 → forced rest
+  if (garminRestForced) {
+    adapted = true;
+    adaptations.push('⌚ Repos obligatoire — Body Battery critique (<30)');
+    adaptations.push('Toutes les séances remplacées par récupération active');
+  }
+  // Garmin soft override: HRV drop or poor sleep score → light session
+  else if (garminLightForced) {
+    adapted = true;
+    if (gHrv !== null && hrv7avg !== null && gHrv < hrv7avg - 5)
+      adaptations.push(`⌚ HRV bas (${gHrv} vs moy. ${Math.round(hrv7avg)}) — intensités réduites`);
+    if (gSleepScore !== null && gSleepScore < 50)
+      adaptations.push(`⌚ Sommeil insuffisant (score ${gSleepScore}) — intensités réduites`);
+  }
+  else if (score < 40) {
     adapted = true;
     adaptations.push('Volume réduit de 20% (fatigue détectée)');
     adaptations.push('Séances intenses remplacées par endurance Z2');
@@ -3136,15 +3296,19 @@ function computeAdaptation(debriefs) {
   else if (injuries === 'lower_general') { adapted = true; adaptations.push('Intensités réduites 15% (douleur hanche/bassin)'); }
   else if (injuries === 'general')    { adapted = true; adaptations.push('Intensités réduites 15% (douleurs signalées)'); }
 
-  if (sleepAlert) { adapted = true; adaptations.push('⚠️ Intensités réduites — manque de sommeil chronique (3+ nuits)'); }
+  if (sleepAlert && !garminRestForced && !garminLightForced) { adapted = true; adaptations.push('⚠️ Intensités réduites — manque de sommeil chronique (3+ nuits)'); }
 
-  const message = score < 40 ? 'Semaine de récupération conseillée'
-                : score > 70 ? 'Tu es en forme — on charge !'
-                : adapted     ? 'Programme ajusté à ton état'
+  const message = garminRestForced  ? '⌚ Repos — Battery critique'
+                : garminLightForced ? '⌚ Séance légère — données Garmin'
+                : score < 40        ? 'Semaine de récupération conseillée'
+                : score > 70        ? 'Tu es en forme — on charge !'
+                : adapted           ? 'Programme ajusté à ton état'
                 : null;
 
-  return { score, fatigueScore, moralScore, sleepScore, rpeScore, fatigue, moral, sleep, rpe,
-           injuries, sleepAlert, adaptations, adapted, message, debriefCount: debriefs.length };
+  return { score, fatigueScore: finalFatigueScore, moralScore, sleepScore: finalSleepScore, rpeScore,
+           fatigue, moral, sleep, rpe,
+           injuries, sleepAlert, adaptations, adapted, message, debriefCount: debriefs.length,
+           garmin, garminRestForced, garminLightForced };
 }
 
 function scaleDuration(durStr, factor) {
@@ -3155,10 +3319,27 @@ function scaleDuration(durStr, factor) {
 
 function adaptPlan(plan, adaptInfo, analysis) {
   if (!adaptInfo || !adaptInfo.adapted) return plan;
-  const { score, injuries, sleepAlert } = adaptInfo;
+  const { score, injuries, sleepAlert, garminRestForced, garminLightForced } = adaptInfo;
 
   const adaptedDays = plan.days.map((day, i) => {
     let d = { ...day };
+
+    // GARMIN FORCED REST: all non-rest sessions → rest_act
+    if (garminRestForced && !['rest','rest_act'].includes(d.key)) {
+      return { ...d, key: 'rest_act', type: 'rest', title: 'Récupération active ⌚',
+        desc: 'Repos recommandé par Garmin — Body Battery critique. Marche légère ou étirements uniquement.', duration: '30min' };
+    }
+
+    // GARMIN LIGHT: reduce all intensities -15%, swap hard sessions
+    if (garminLightForced && !['rest','rest_act'].includes(d.key)) {
+      const swaps = { bike_seuil: ['bike_z2','bike','Vélo — Z2 ⌚'], run_tempo: ['run_z2','run','Course — Z2 ⌚'],
+                      swim_intv: ['swim_tech','swim','Natation — Technique ⌚'] };
+      if (swaps[d.key]) {
+        const [nk, nt, ntitle] = swaps[d.key];
+        d = { ...d, key: nk, type: nt, title: ntitle, desc: d.desc + ' — Adapté : HRV/sommeil Garmin.' };
+      }
+      if (d.duration) d = { ...d, duration: scaleDuration(d.duration, 0.85) };
+    }
 
     // INJURY: lower body running pain → swap run sessions for bike/swim
     if (injuries === 'lower_run' && ['run_z2','run_tempo','run_long','brick'].includes(d.key)) {
@@ -3221,13 +3402,17 @@ function adaptPlan(plan, adaptInfo, analysis) {
 
 function renderAdaptBanner(info) {
   const { score, adapted, adaptations, message, sleepAlert, debriefCount,
-          fatigueScore, moralScore, sleepScore, rpeScore } = info;
-  if (score === null) return '';
+          fatigueScore, moralScore, sleepScore, rpeScore, garmin, garminRestForced, garminLightForced } = info;
+  if (score === null && !garmin) return '';
+  if (score === null) return ''; // garmin-only handled via formeGarminWidget
 
   const col  = score < 40 ? '#ff4d6d' : score > 70 ? '#06d6a0' : '#f77f00';
   const bg   = score < 40 ? 'rgba(255,77,109,0.07)' : score > 70 ? 'rgba(6,214,160,0.07)' : 'rgba(247,127,0,0.07)';
   const icon = score < 40 ? '🔴' : score > 70 ? '🟢' : '🟡';
   const label = message || (score >= 40 && score <= 70 && !adapted ? 'Forme correcte — programme standard' : '');
+
+  const garminBadge = (garminRestForced || garminLightForced)
+    ? `<span style="font-size:0.62rem;background:rgba(199,125,255,0.15);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:5px;">⌚ Garmin</span>` : '';
 
   const subScores = [
     { l:'Fatigue', v: fatigueScore }, { l:'Moral', v: moralScore },
@@ -3253,8 +3438,8 @@ function renderAdaptBanner(info) {
   return `<div style="background:${bg};border:1px solid ${col}35;border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.85rem;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div style="flex:1;">
-        <div style="font-size:0.82rem;font-weight:600;color:${col};">${icon} ${label}</div>
-        <div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">Basé sur ${debriefCount} débrief${debriefCount>1?'s':''}</div>
+        <div style="font-size:0.82rem;font-weight:600;color:${col};">${icon} ${label}${garminBadge}</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:2px;">Basé sur ${debriefCount} débrief${debriefCount>1?'s':''}${garmin ? ' + données Garmin' : ''}</div>
         ${subHtml}
       </div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${col};line-height:1;margin-left:12px;">${score}</div>
