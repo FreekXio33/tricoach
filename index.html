@@ -268,6 +268,17 @@
   .nutr-item:last-child { border-bottom:none; }
   .nutr-val { font-weight:600; color:var(--accent); }
 
+  /* SÉANCE DU JOUR */
+  .sdj-card { border-radius:14px;padding:0;margin-bottom:1rem;overflow:hidden;border:1px solid var(--border);position:relative; }
+  .sdj-accent { position:absolute;top:0;left:0;bottom:0;width:4px; }
+  .sdj-inner { padding:1rem 1rem 1rem 1.25rem; }
+  .sdj-label { font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:1.8px;opacity:0.7;margin-bottom:4px; }
+  .sdj-title { font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:0.5px;line-height:1.1;margin-bottom:2px; }
+  .sdj-dur   { font-size:0.75rem;opacity:0.7;margin-bottom:0.65rem; }
+  .sdj-interval { display:flex;align-items:flex-start;gap:6px;font-size:0.78rem;line-height:1.45;margin-bottom:3px; }
+  .sdj-dot { width:5px;height:5px;border-radius:50%;flex-shrink:0;margin-top:6px; }
+  .sdj-btns { display:flex;gap:7px;margin-top:0.85rem; }
+  .sdj-btn { flex:1;border:none;border-radius:8px;padding:0.55rem 0;font-size:0.82rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;text-align:center; }
   /* SESSION DETAIL MODAL */
   .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;display:flex;align-items:flex-end;justify-content:center; }
   .modal-sheet { background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:600px;max-height:88vh;overflow-y:auto;padding:1.25rem 1.5rem 2.5rem; }
@@ -346,7 +357,7 @@
     <div id="dashLoading" class="spinner"></div>
     <div id="dashContent" style="display:none;">
       <div id="weatherWidget"></div>
-      <div id="weeklyGoalsWidget"></div>
+      <div id="sessionDuJourWidget"></div>
       <div class="goal-banner">
         <div class="goal-icon">🏆</div>
         <div>
@@ -696,7 +707,7 @@ function renderDashboard() {
   // Forme du jour
   renderFormeDuJour();
   renderWeatherWidget();
-  renderWeeklyGoalsWidget();
+  renderSessionDuJour();
 
   // Streak
   const streak = calcStreak();
@@ -2656,62 +2667,198 @@ async function markDayDone(idx, title, type) {
   if (nowDone) setTimeout(() => openDebrief(idx), 500);
 }
 
-async function renderWeeklyGoalsWidget() {
-  const el = document.getElementById('weeklyGoalsWidget');
+// ===== SÉANCE DU JOUR =====
+
+function getMainIntervals(key, mv, a) {
+  const ftp = mv.ftp || 0;
+  const hrMax = mv.hrMax || 185;
+  const hrRest = mv.hrRest || 55;
+  const vma = mv.vma || 0;
+  const ftpEst = ftp > 0 ? ftp : 200;
+  const vmaEst = vma > 0 ? vma : (a && a.avgRunSpeed > 0 ? a.avgRunSpeed * 3.6 * 1.1 : 15);
+  const swimEst = mv.swimPace > 0 ? mv.swimPace : (a && a.avgSwimSpeed > 0 ? 100/a.avgSwimSpeed/60 : 2.0);
+  const hrr = hrMax - hrRest;
+  const zHR = (lo, hi) => `${Math.round(hrRest+lo*hrr)}-${Math.round(hrRest+hi*hrr)} bpm`;
+  const pw = (lo, hi) => ftpEst > 0 ? `${Math.round(ftpEst*lo)}-${Math.round(ftpEst*hi)}W` : `${Math.round(lo*100)}-${Math.round(hi*100)}% FTP`;
+  const ss = Math.round(swimEst * 60);
+  const sf = d => { const t=ss+d; return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}/100m`; };
+  const vmaMps = vmaEst / 3.6;
+  const rp = p => { const s=Math.round(1000/(vmaMps*p)); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}/km`; };
+  const raceP  = mv.runPace703  > 0 ? fmtDecPace(mv.runPace703)  + '/km' : rp(0.85);
+  const tempoP = mv.runPaceSemi > 0 ? fmtDecPace(mv.runPaceSemi) + '/km' : rp(0.88);
+
+  const M = {
+    swim_tech:  [`400m échauffement — ${sf(30)}`, `6×50m drill technique — ${sf(25)}`, `4×100m pull-buoy — ${sf(8)} · FC ${zHR(0.60,0.75)}`],
+    swim_intv:  [`300m échauffement progressif`, `8×100m — ${sf(0)} → ${sf(-5)} (Z3-Z4)`, `2×200m soutenu — ${sf(5)}`],
+    swim_group: [`Séance encadrée · référence ${sf(0)}`, `Focus rotation du corps + respiration`, `FC cible Z2-Z3 : ${zHR(0.60,0.80)}`],
+    bike_z2:    [`15min échauffement Z1-Z2`, `Endurance continue — ${pw(0.60,0.75)} · FC ${zHR(0.60,0.73)}`, `Cadence 85-95 rpm · position TT`],
+    bike_seuil: [`20min échauffement + 2 accélérations`, `3×10min — ${pw(0.93,1.05)} · FC ${zHR(0.78,0.88)} (Z4)`, `Récup 5min à ${pw(0.50,0.52)} entre chaque bloc`],
+    bike_long:  [`20min Z2 mise en route`, `2×20min sweetspot — ${pw(0.87,0.93)} · FC ${zHR(0.72,0.83)}`, `Ravitaillement 60-90g CHO/h`],
+    run_z2:     [`5min activation progressive`, `Run continu ${rp(0.73)} ± 15s/km · FC ${zHR(0.60,0.73)}`, `Cadence 178-182 pas/min · foulée légère`],
+    run_tempo:  [`15min échauffement + 6 strides`, `3×10min — ${tempoP} · FC ${zHR(0.78,0.87)} (Z4)`, `Récup 3min trot ${rp(0.64)} entre blocs`],
+    run_long:   [`15min très facile — ${rp(0.63)}`, `1ère moitié — ${rp(0.73)} (Z2)`, `2ème moitié — ${raceP} (allure 70.3)`],
+    brick:      [`45min vélo — ${pw(0.70,0.85)} · FC ${zHR(0.65,0.78)}`, `Transition T2 rapide < 90s`, `25min course — ${raceP} · FC ${zHR(0.72,0.83)}`],
+    rest:       [`Récupération complète — aucun effort`, `Marche légère 20-30min si souhaité`, `Sommeil 8h · protéines + hydratation`],
+    rest_act:   [`Natation Z1 très douce ou marche`, `FC max < ${Math.round(hrRest+0.60*hrr)} bpm toute la séance`, `Étirements ou yoga léger 15-20min`],
+  };
+  return M[key] || M.rest;
+}
+
+async function renderSessionDuJour() {
+  const el = document.getElementById('sessionDuJourWidget');
   if (!el) return;
-  const goals = await sbLoadWeeklyGoals();
 
-  const getType = a => a.sport_type || a.type || '';
-  const weekStart = getWeekMonday();
-  const weekActs = activities.filter(a => new Date(a.start_date) >= weekStart);
-  const swimKm = weekActs.filter(a=>getType(a)==='Swim').reduce((s,a)=>s+a.distance/1000,0);
-  const bikeKm = weekActs.filter(a=>['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a))).reduce((s,a)=>s+a.distance/1000,0);
-  const runKm  = weekActs.filter(a=>['Run','TrailRun'].includes(getType(a))).reduce((s,a)=>s+a.distance/1000,0);
+  const today = new Date();
+  const todayIdx = (today.getDay() + 6) % 7; // 0=Mon … 6=Sun
+  const todayStr = today.toISOString().split('T')[0];
+  const isDone = localStorage.getItem(`done_${todayStr}_${todayIdx}`) === '1';
 
-  if (!goals) {
-    el.innerHTML = `<div style="font-size:0.72rem;color:var(--muted);text-align:center;padding:0.5rem 0;">
-      <button onclick="showGoalsForm()" style="background:none;border:none;color:var(--accent);font-size:0.78rem;font-family:'DM Sans',sans-serif;cursor:pointer;text-decoration:underline;">+ Définir des objectifs de la semaine</button>
+  // Resolve today's session
+  let session = null;
+  if (currentPlan) {
+    session = currentPlan.days[todayIdx];
+  } else {
+    // Try saved schedule from localStorage
+    const weekStart = getWeekMonday().toISOString().split('T')[0];
+    const ls = localStorage.getItem(`schedule_${weekStart}`);
+    if (ls) {
+      try { const rows = JSON.parse(ls); session = rows[todayIdx] || null; } catch {}
+    }
+    // Fall back to fresh plan from Strava data
+    if (!session && activities.length > 0) {
+      try {
+        const plan = buildTrainingWeek(analyzeAthleteData());
+        session = plan.days[todayIdx];
+      } catch {}
+    }
+  }
+
+  if (!session) { el.innerHTML = ''; return; }
+
+  const mv = getMetrics();
+  const a  = currentAnalysis || (activities.length ? analyzeAthleteData() : {});
+  const key = session.key || session.type || 'rest';
+  const isRest = session.type === 'rest' || session.type === 'rest_act' || !session.type;
+
+  const TYPE_COL  = { swim:'#00b4d8', bike:'#f77f00', run:'#06d6a0', brick:'#f77f00', rest:'#6b7a90' };
+  const TYPE_BG   = { swim:'rgba(0,180,216,0.07)', bike:'rgba(247,127,0,0.07)', run:'rgba(6,214,160,0.07)', brick:'rgba(247,127,0,0.07)', rest:'rgba(107,122,144,0.05)' };
+  const TYPE_ICON = { swim:'🏊', bike:'🚴', run:'🏃', brick:'⚡', rest:'💤' };
+  const col  = TYPE_COL[session.type]  || '#6b7a90';
+  const bg   = TYPE_BG[session.type]   || 'rgba(107,122,144,0.05)';
+  const icon = TYPE_ICON[session.type] || '📅';
+  const safeTitle = (session.title || 'Repos').replace(/'/g,'').replace(/"/g,'');
+
+  // — COMPLETED STATE —
+  if (isDone) {
+    const act = activities.find(ac => {
+      const d = (ac.start_date_local || ac.start_date || '').split('T')[0];
+      if (d !== todayStr) return false;
+      const t = ac.sport_type || ac.type || '';
+      if (session.type === 'swim')  return t === 'Swim';
+      if (session.type === 'bike')  return ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+      if (session.type === 'run')   return ['Run','TrailRun'].includes(t);
+      if (session.type === 'brick') return ['Ride','VirtualRide','Run','TrailRun'].includes(t);
+      return false;
+    });
+    const stravaLine = act ? (() => {
+      const parts = [];
+      if (act.moving_time) parts.push(fmtDur(Math.round(act.moving_time/60)));
+      if (act.distance)    parts.push((act.distance/1000).toFixed(1) + 'km');
+      if (act.average_heartrate) parts.push(Math.round(act.average_heartrate) + 'bpm moy.');
+      if (act.average_watts)     parts.push(Math.round(act.average_watts) + 'W moy.');
+      return parts.length ? parts.join(' · ') : null;
+    })() : null;
+
+    el.innerHTML = `<div class="sdj-card" style="background:rgba(6,214,160,0.06);">
+      <div class="sdj-accent" style="background:#06d6a0;"></div>
+      <div class="sdj-inner">
+        <div class="sdj-label" style="color:#06d6a0;">✓ SÉANCE COMPLÉTÉE</div>
+        <div class="sdj-title" style="color:#06d6a0;">${session.title}</div>
+        ${stravaLine ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:4px;margin-bottom:0.65rem;">📊 Strava : ${stravaLine}</div>` : `<div class="sdj-dur">Bravo ! Séance validée aujourd'hui.</div>`}
+        <div class="sdj-btns">
+          <button class="sdj-btn" onclick="openDebriefByKey(${todayIdx},'${safeTitle}','${session.type}')"
+            style="background:rgba(6,214,160,0.12);color:#06d6a0;border:1px solid rgba(6,214,160,0.25);">📝 Débrief</button>
+          <button class="sdj-btn" onclick="openSessionByKey('${key}','${safeTitle}')"
+            style="background:var(--surface2);color:var(--muted);border:1px solid var(--border);">📋 Voir</button>
+        </div>
+      </div>
     </div>`;
     return;
   }
 
-  const bar = (val, target, color) => {
-    if (!target) return '';
-    const pct = Math.min(100, Math.round(val / target * 100));
-    return `<div style="flex:1;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${color};border-radius:3px;"></div></div>`;
-  };
+  // — REST DAY —
+  if (isRest) {
+    const tips = ['Étirements 15min · rouleau de massage · sommeil 8h.',
+      'Marche légère 20-30min pour activer la circulation.',
+      'Priorise protéines + glucides complexes · hydratation 2L+.',
+      'Bain froid ou contraste chaud/froid pour accélérer la récupération.'];
+    const tip = tips[today.getDay() % tips.length];
+    el.innerHTML = `<div class="sdj-card" style="background:var(--surface);">
+      <div class="sdj-accent" style="background:var(--muted);"></div>
+      <div class="sdj-inner">
+        <div class="sdj-label" style="color:var(--muted);">AUJOURD'HUI</div>
+        <div class="sdj-title">Jour de repos 💤</div>
+        <div class="sdj-dur" style="margin-bottom:0.75rem;">Récupération complète</div>
+        <div style="font-size:0.78rem;color:var(--muted);line-height:1.5;padding:0.5rem 0.65rem;background:var(--surface2);border-radius:7px;">💡 ${tip}</div>
+      </div>
+    </div>`;
+    return;
+  }
 
-  el.innerHTML = `<div style="background:var(--surface);border-radius:10px;padding:0.75rem;border:1px solid var(--border);margin-bottom:1rem;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <div style="font-size:0.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Objectifs semaine</div>
-      <button onclick="showGoalsForm()" style="background:none;border:none;color:var(--muted);font-size:0.75rem;font-family:'DM Sans',sans-serif;cursor:pointer;">Modifier</button>
+  // — ACTIVE SESSION —
+  const intervals = getMainIntervals(key, mv, a);
+  el.innerHTML = `<div class="sdj-card" style="background:${bg};">
+    <div class="sdj-accent" style="background:${col};"></div>
+    <div class="sdj-inner">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="sdj-label" style="color:${col};">${icon} SÉANCE DU JOUR</div>
+          <div class="sdj-title" style="color:${col};">${session.title}</div>
+        </div>
+        ${session.duration ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:${col};opacity:0.85;line-height:1;flex-shrink:0;margin-left:8px;">${session.duration}</div>` : ''}
+      </div>
+      <div style="margin:0.6rem 0 0.75rem;">
+        ${intervals.map(iv => `<div class="sdj-interval">
+          <div class="sdj-dot" style="background:${col};"></div>
+          <div style="color:var(--text);opacity:0.9;">${iv}</div>
+        </div>`).join('')}
+      </div>
+      <div class="sdj-btns">
+        <button class="sdj-btn" onclick="openSessionByKey('${key}','${safeTitle}')"
+          style="background:${col}18;color:${col};border:1px solid ${col}45;">📋 Voir la séance</button>
+        <button class="sdj-btn" id="sdjValidateBtn" onclick="validateFromDashboard(${todayIdx},'${safeTitle}','${session.type}')"
+          style="background:${col};color:white;">✓ Valider</button>
+      </div>
     </div>
-    ${goals.swim_km ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:0.72rem;width:20px;">🏊</span>${bar(swimKm,goals.swim_km,'#00b4d8')}<span style="font-size:0.7rem;color:var(--muted);white-space:nowrap;">${swimKm.toFixed(1)}/${goals.swim_km}km</span></div>` : ''}
-    ${goals.bike_km ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:0.72rem;width:20px;">🚴</span>${bar(bikeKm,goals.bike_km,'#f77f00')}<span style="font-size:0.7rem;color:var(--muted);white-space:nowrap;">${bikeKm.toFixed(0)}/${goals.bike_km}km</span></div>` : ''}
-    ${goals.run_km  ? `<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:0.72rem;width:20px;">🏃</span>${bar(runKm,goals.run_km,'#06d6a0')}<span style="font-size:0.7rem;color:var(--muted);white-space:nowrap;">${runKm.toFixed(1)}/${goals.run_km}km</span></div>` : ''}
   </div>`;
 }
 
-function showGoalsForm() {
-  const el = document.getElementById('weeklyGoalsWidget');
-  if (!el) return;
-  el.innerHTML = `<div style="background:var(--surface);border-radius:10px;padding:0.75rem;border:1px solid var(--border);margin-bottom:1rem;">
-    <div style="font-size:0.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Objectifs de la semaine</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div><div style="font-size:0.68rem;color:var(--swim);margin-bottom:3px;">🏊 Nat. (km)</div><input id="g_swim" type="number" min="0" step="0.5" class="metric-input" style="width:100%;"></div>
-      <div><div style="font-size:0.68rem;color:var(--bike);margin-bottom:3px;">🚴 Vélo (km)</div><input id="g_bike" type="number" min="0" step="5" class="metric-input" style="width:100%;"></div>
-      <div><div style="font-size:0.68rem;color:var(--run);margin-bottom:3px;">🏃 Cap. (km)</div><input id="g_run" type="number" min="0" step="1" class="metric-input" style="width:100%;"></div>
-    </div>
-    <button onclick="saveGoals()" style="width:100%;background:var(--accent);color:white;border:none;border-radius:6px;padding:0.5rem;font-size:0.8rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;">Enregistrer</button>
-  </div>`;
+function openSessionByKey(key, title) {
+  const mv = getMetrics();
+  const a  = currentAnalysis || (activities.length ? analyzeAthleteData() : {});
+  document.getElementById('sessionModalTitle').textContent = title;
+  document.getElementById('sessionModalBody').innerHTML = buildSessionDetail(key, mv, a);
+  document.getElementById('sessionModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
 }
 
-async function saveGoals() {
-  const swim = parseFloat(document.getElementById('g_swim')?.value) || null;
-  const bike = parseFloat(document.getElementById('g_bike')?.value) || null;
-  const run  = parseFloat(document.getElementById('g_run')?.value)  || null;
-  await sbSaveWeeklyGoals({ swim, bike, run });
-  renderWeeklyGoalsWidget();
+function openDebriefByKey(dayIdx, title, type) {
+  // Build minimal session object for debrief
+  if (!currentPlan) {
+    try {
+      const plan = buildTrainingWeek(analyzeAthleteData());
+      currentPlan = plan;
+      currentAnalysis = analyzeAthleteData();
+    } catch {}
+  }
+  openDebrief(dayIdx);
+}
+
+async function validateFromDashboard(dayIdx, title, type) {
+  const btn = document.getElementById('sdjValidateBtn');
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  await markDayDone(dayIdx, title, type);
+  setTimeout(() => renderSessionDuJour(), 300);
 }
 
 // ===== DRAG & DROP / SCHEDULE =====
