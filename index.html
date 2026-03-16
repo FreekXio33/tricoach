@@ -422,7 +422,7 @@ async function fetchActivities(token) {
   try {
     // Get activities from last 8 weeks (for progression charts)
     const since = Math.floor(Date.now()/1000) - 56*86400;
-    const res = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=30`, {
+    const res = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=100`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     activities = await res.json();
