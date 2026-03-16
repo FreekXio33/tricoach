@@ -539,15 +539,18 @@ initServiceWorker();
 
 async function fetchActivities(token) {
   try {
-    // Get activities from last 8 weeks (for progression charts)
-    const since = Math.floor(Date.now()/1000) - 56*86400;
-    const res = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=100`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    activities = await res.json();
-    if (Array.isArray(activities)) {
-      activities.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
-    }
+    // Fetch last 6 months (180 days) — 2 pages × 200 to cover up to 400 activities
+    const since = Math.floor(Date.now()/1000) - 180*86400;
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const [p1, p2] = await Promise.all([
+      fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=200&page=1`, { headers }).then(r => r.json()),
+      fetch(`https://www.strava.com/api/v3/athlete/activities?after=${since}&per_page=200&page=2`, { headers }).then(r => r.json())
+    ]);
+    const all = [...(Array.isArray(p1) ? p1 : []), ...(Array.isArray(p2) ? p2 : [])];
+    // Deduplicate by id and sort descending
+    const seen = new Set();
+    activities = all.filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; });
+    activities.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
     renderDashboard();
   } catch(e) {
     document.getElementById('dashLoading').innerHTML = '<div class="error-box">Erreur de chargement des activités.</div>';
@@ -1338,9 +1341,9 @@ function renderProgressionCharts() {
   const isRun  = t => ['Run','TrailRun'].includes(t);
   const now = new Date();
 
-  // Build 8 weekly bins (oldest first)
-  const bins = Array.from({length: 8}, (_, i) => {
-    const weeksAgo = 7 - i;
+  // Build 24 weekly bins (oldest first) — 6 months of data now available
+  const bins = Array.from({length: 24}, (_, i) => {
+    const weeksAgo = 23 - i;
     const end = new Date(now); end.setDate(now.getDate() - weeksAgo * 7); end.setHours(23,59,59,999);
     const start = new Date(end); start.setDate(end.getDate() - 6); start.setHours(0,0,0,0);
     const d = start.getDate(), m = start.getMonth() + 1;
@@ -1566,7 +1569,7 @@ function fmtSecs(s) {
 // ===== FITNESS CURVE CTL/ATL/TSB =====
 function computeFitnessCurve() {
   const now = new Date(); now.setHours(23,59,59,999);
-  const days = 112;
+  const days = 180; // 6 months of CTL/ATL/TSB history
   const loadByDay = {};
   activities.forEach(a => {
     const d = new Date(a.start_date); d.setHours(0,0,0,0);
@@ -1762,10 +1765,10 @@ function estimateVO2max() {
   if (mv.hrMax && mv.hrRest && mv.hrRest > 0) {
     return Math.round(15 * mv.hrMax / mv.hrRest);
   }
-  // Method 2: Daniels from best run activity
+  // Method 2: Daniels from best effort across 6 months — fastest pace on runs ≥ 20min
   const runs = activities.filter(a => {
     const t = a.sport_type || a.type || '';
-    return ['Run','TrailRun'].includes(t) && a.moving_time > 600 && a.distance > 1000;
+    return ['Run','TrailRun'].includes(t) && a.moving_time >= 1200 && a.distance >= 3000;
   });
   if (!runs.length) return null;
   const best = runs.reduce((b, a) => (a.distance / a.moving_time > b.distance / b.moving_time ? a : b));
@@ -1799,13 +1802,17 @@ function detectBricks() {
 // ===== PLATEAU DETECTOR =====
 function detectPlateau() {
   const now = new Date();
-  const cut2w = new Date(now - 14 * 86400000);
-  const cut6w = new Date(now - 42 * 86400000);
+  // With 6 months of data: compare last 4 weeks vs 4 weeks before that (weeks 5-8)
+  const cut4w  = new Date(now - 28 * 86400000);
+  const cut8w  = new Date(now - 56 * 86400000);
+  // Also check 3-week stagnation window for more sensitive detection
+  const cut2w  = new Date(now - 14 * 86400000);
+  const cut6w  = new Date(now - 42 * 86400000);
   const getType = a => a.sport_type || a.type || '';
   const isRun = t => ['Run','TrailRun'].includes(t);
 
-  const recent = activities.filter(a => new Date(a.start_date) >= cut2w);
-  const older = activities.filter(a => { const d = new Date(a.start_date); return d >= cut6w && d < cut2w; });
+  const recent = activities.filter(a => new Date(a.start_date) >= cut4w);
+  const older  = activities.filter(a => { const d = new Date(a.start_date); return d >= cut8w && d < cut4w; });
 
   const avgRunSpd = arr => {
     const runs = arr.filter(a => isRun(getType(a)) && a.moving_time > 0 && a.distance > 0);
