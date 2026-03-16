@@ -236,6 +236,29 @@
   .zone-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .zone-name-txt { font-size: 0.75rem; flex: 1; }
   .zone-range { font-size: 0.75rem; font-weight: 600; min-width: 90px; text-align: right; }
+
+  /* WEATHER */
+  .weather-widget { display:flex; align-items:center; gap:12px; background:var(--surface); border-radius:12px; padding:0.85rem 1rem; border:1px solid var(--border); margin-bottom:1rem; }
+  .weather-temp { font-family:'Bebas Neue',sans-serif; font-size:2rem; line-height:1; color:var(--text); }
+  .weather-detail { font-size:0.72rem; color:var(--muted); margin-top:3px; line-height:1.5; }
+  /* SHARE CARD */
+  .share-card { background:linear-gradient(135deg,#1a1d24 0%,#0a0c10 100%); border-radius:16px; padding:1.25rem; border:1px solid var(--border); margin-top:0.75rem; display:none; }
+  /* RACE SIMULATOR */
+  .sim-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .sim-label { font-size:0.82rem; width:110px; color:var(--text); flex-shrink:0; }
+  .sim-input { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:0.3rem 0.5rem; font-size:0.85rem; color:var(--text); font-family:'DM Sans',sans-serif; width:55px; text-align:right; outline:none; }
+  .sim-input:focus { border-color:var(--accent); }
+  .sim-unit { font-size:0.72rem; color:var(--muted); width:45px; }
+  /* BENCHMARK TABLE */
+  .bench-table { width:100%; border-collapse:collapse; font-size:0.75rem; }
+  .bench-table th { color:var(--muted); font-weight:600; padding:0.4rem 0.5rem; text-align:left; border-bottom:1px solid var(--border); }
+  .bench-table td { padding:0.4rem 0.5rem; border-bottom:1px solid var(--border); }
+  .bench-table tr.athlete-row td { font-weight:600; color:var(--accent); }
+  /* NUTRITION */
+  .nutr-result { background:var(--surface); border-radius:10px; border:1px solid var(--border); padding:0.85rem; margin-top:0.75rem; }
+  .nutr-item { display:flex; justify-content:space-between; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:0.82rem; }
+  .nutr-item:last-child { border-bottom:none; }
+  .nutr-val { font-weight:600; color:var(--accent); }
 </style>
 </head>
 <body>
@@ -273,6 +296,7 @@
     <button class="tab active" onclick="switchTab('dashboard',this)">📊 Tableau de bord</button>
     <button class="tab" onclick="switchTab('programme',this)">📅 Programme</button>
     <button class="tab" onclick="switchTab('coach',this)">💡 Conseils</button>
+    <button class="tab" onclick="switchTab('race',this)">🏁 Race</button>
     <button class="tab" onclick="switchTab('progression',this)">📈 Progression</button>
     <button class="tab" onclick="switchTab('carte',this)">🗺️ Carte</button>
     <button class="tab" onclick="switchTab('profil',this)">👤 Profil</button>
@@ -282,6 +306,7 @@
   <div id="tab-dashboard" class="page active">
     <div id="dashLoading" class="spinner"></div>
     <div id="dashContent" style="display:none;">
+      <div id="weatherWidget"></div>
       <div class="goal-banner">
         <div class="goal-icon">🏆</div>
         <div>
@@ -329,6 +354,7 @@
         <div class="section-title">Dernières activités</div>
       </div>
       <div id="activitiesList"></div>
+      <div id="shareCardContainer"></div>
     </div>
   </div>
 
@@ -355,6 +381,15 @@
     <div id="coachAdvice"></div>
   </div>
 
+  <!-- RACE -->
+  <div id="tab-race" class="page">
+    <div style="margin-bottom:1rem;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Outils Race</div>
+      <div style="font-size:0.78rem;color:var(--muted);">Simulateur · Nutrition · Allures · Benchmarks</div>
+    </div>
+    <div id="raceContent"></div>
+  </div>
+
   <!-- PROGRESSION -->
   <div id="tab-progression" class="page">
     <div style="margin-bottom:1rem;">
@@ -369,6 +404,13 @@
           <canvas id="chartFitness" height="130"></canvas>
         </div>
         <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;line-height:1.5;">CTL = forme chronique (42j) · ATL = fatigue aiguë (7j) · TSB = fraîcheur (CTL−ATL)</div>
+      </div>
+      <div id="bikeEFSection" style="margin-bottom:1.5rem;display:none;">
+        <div class="section-title" style="margin-bottom:0.6rem;color:var(--bike);">⚡ Efficacité vélo (W/bpm)</div>
+        <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem;">
+          <canvas id="chartBikeEF" height="120"></canvas>
+        </div>
+        <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;">EF = watts moyens / FC moyenne · Requiert capteur de puissance</div>
       </div>
       <div style="margin-bottom:1.5rem;">
         <div class="section-title" style="margin-bottom:0.6rem;color:var(--swim);">🏊 Natation</div>
@@ -563,6 +605,7 @@ function renderDashboard() {
 
   // Forme du jour
   renderFormeDuJour();
+  renderWeatherWidget();
 
   // Streak
   const streak = calcStreak();
@@ -596,16 +639,20 @@ function renderDashboard() {
     const hr = a.average_heartrate ? ` · ♥ ${Math.round(a.average_heartrate)}bpm` : '';
     const tc = typeClass[sportType] || 'other';
     const cc = colors[sportType] || 'accent';
-    return `<div class="activity-item">
-      <div class="act-icon ${tc}">${icons[sportType]||'⚡'}</div>
-      <div class="act-info">
-        <div class="act-name">${escapeHtml(a.name) || 'Activité'}</div>
-        <div class="act-meta">${dateStr} · ${Math.round(a.moving_time/60)}min${hr}</div>
+    const idx = activities.indexOf(a);
+    return `<div>
+      <div class="activity-item" onclick="toggleActivityDetail(${idx})" style="cursor:pointer;">
+        <div class="act-icon ${tc}">${icons[sportType]||'⚡'}</div>
+        <div class="act-info">
+          <div class="act-name">${escapeHtml(a.name) || 'Activité'}</div>
+          <div class="act-meta">${dateStr} · ${Math.round(a.moving_time/60)}min${hr}</div>
+        </div>
+        <div class="act-stats">
+          <div class="act-dist ${cc}">${dist}</div>
+          <div class="act-pace">${pace}</div>
+        </div>
       </div>
-      <div class="act-stats">
-        <div class="act-dist ${cc}">${dist}</div>
-        <div class="act-pace">${pace}</div>
-      </div>
+      <div id="actDetail-${idx}" style="display:none;background:var(--surface2);border-radius:0 0 10px 10px;border:1px solid var(--border);border-top:none;padding:0.75rem;margin-bottom:0;"></div>
     </div>`;
   }).join('');
 
@@ -1270,6 +1317,11 @@ function renderProfil() {
       <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem;">MODE D'AFFICHAGE</div>
       <button id="themeToggleBtn" onclick="toggleTheme();renderProfil();" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0.6rem 1.2rem;font-size:0.85rem;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">${themeLabel()}</button>
     </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-top:1rem;">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">AGENDA D'ENTRAÎNEMENT</div>
+      <div style="font-size:0.82rem;margin-bottom:0.75rem;line-height:1.5;">Télécharge le programme de la semaine au format .ics pour l'importer dans Calendrier Apple ou Google Calendar.</div>
+      <button onclick="downloadICS()" style="background:var(--surface);color:var(--accent);border:1px solid var(--border);border-radius:8px;padding:0.6rem 1.2rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">📅 Télécharger .ics</button>
+    </div>
     ${metricsFormHtml}`;
 
   setTimeout(renderMetricZones, 0);
@@ -1354,6 +1406,22 @@ function renderProgressionCharts() {
   mkChart('chartSwim', '#00b4d8', swimVol, swimPaces, 'km', 'min/100m', v => v ? v.toFixed(2) + ' min/100m' : '—');
   mkChart('chartBike', '#f77f00', bikeVol, bikePaces, 'km', 'km/h',     v => v ? v.toFixed(1) + ' km/h' : '—');
   mkChart('chartRun',  '#06d6a0', runVol,  runPaces,  'km', 'min/km',   v => v ? v.toFixed(2) + ' min/km' : '—');
+
+  // Bike efficiency chart
+  const bikeEF = getBikeEfficiency();
+  const efEl = document.getElementById('chartBikeEF');
+  if (efEl && bikeEF.length >= 2) {
+    if (progCharts.bikeEF) progCharts.bikeEF.destroy();
+    progCharts.bikeEF = new Chart(efEl, {
+      type: 'line',
+      data: {
+        labels: bikeEF.map(p => p.date),
+        datasets: [{ label:'EF (W/bpm)', data: bikeEF.map(p => p.ef), borderColor:'#f77f00', borderWidth:2, pointRadius:3, pointBackgroundColor:'#f77f00', tension:0.3, fill:false }]
+      },
+      options: { responsive:true, plugins:{ legend:{display:false} }, scales: { x:{ ticks:{color:'#666',font:{size:9}}, grid:{color:'rgba(255,255,255,0.04)'} }, y:{ ticks:{color:'#888',font:{size:9}}, grid:{color:'rgba(255,255,255,0.05)'} } } }
+    });
+    document.getElementById('bikeEFSection').style.display = 'block';
+  }
 }
 
 function switchTab(name, el) {
@@ -1363,6 +1431,7 @@ function switchTab(name, el) {
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'programme' && !document.getElementById('weekPlan').innerHTML) generatePlan();
   if (name === 'coach') renderCoachAdvice();
+  if (name === 'race') renderRaceTab();
   if (name === 'progression') renderProgressionCharts();
   if (name === 'carte') renderMapTab();
   if (name === 'profil') { renderProfil(); updateNotifBtn(); }
@@ -1614,6 +1683,522 @@ async function renderMapTab() {
       <div style="font-size:0.7rem;color:var(--muted);">${ds} · ${Math.round(a.moving_time/60)}min · ${(a.distance/1000).toFixed(1)}km</div></div>
     </div>`;
   }).join('');
+}
+
+// ===== WEATHER & METEO =====
+let weatherCache = null;
+async function fetchMeteo() {
+  if (weatherCache && weatherCache.ts > Date.now() - 600000) return weatherCache.data;
+  try {
+    const [wr, mr] = await Promise.all([
+      fetch('https://api.open-meteo.com/v1/forecast?latitude=43.6047&longitude=3.8722&current=temperature_2m,wind_speed_10m,precipitation,weathercode&timezone=Europe/Paris').then(r=>r.json()),
+      fetch('https://marine-api.open-meteo.com/v1/marine?latitude=43.3&longitude=3.7&current=sea_surface_temperature&timezone=Europe/Paris').then(r=>r.json()).catch(()=>null)
+    ]);
+    const data = {
+      temp: wr.current?.temperature_2m ?? null,
+      wind: wr.current?.wind_speed_10m ?? null,
+      rain: wr.current?.precipitation ?? null,
+      code: wr.current?.weathercode ?? 0,
+      seaTemp: mr?.current?.sea_surface_temperature ?? null
+    };
+    weatherCache = { ts: Date.now(), data };
+    return data;
+  } catch(e) { return null; }
+}
+
+function weatherEmoji(code) {
+  if (code === 0) return '☀️';
+  if (code <= 3) return '⛅';
+  if (code <= 48) return '🌫️';
+  if (code <= 67) return '🌧️';
+  if (code <= 82) return '🌦️';
+  return '⛈️';
+}
+
+async function renderWeatherWidget() {
+  const el = document.getElementById('weatherWidget');
+  if (!el) return;
+  const w = await fetchMeteo();
+  if (!w || w.temp === null) { el.innerHTML = ''; return; }
+
+  // Wetsuit rule (IRONMAN 70.3): legal ≤ 24.5°C
+  const seaT = w.seaTemp ?? (w.temp - 3); // estimate if no marine data
+  const wetsuitOk = seaT <= 24.5;
+  const wetsuitTxt = wetsuitOk
+    ? `✅ Combinaison autorisée (${seaT.toFixed(1)}°C)`
+    : `❌ Combinaison interdite (${seaT.toFixed(1)}°C > 24.5°C)`;
+
+  // Heat index for pace adjustment
+  let heatNote = '';
+  if (w.temp >= 25) {
+    const adj = Math.round((w.temp - 25) / 5 * 5);
+    heatNote = `<div style="font-size:0.72rem;color:#f77f00;margin-top:4px;">🌡️ Chaleur : allures ajustées +${adj}% (>${w.temp.toFixed(0)}°C)</div>`;
+  }
+
+  el.innerHTML = `
+    <div class="weather-widget">
+      <div style="font-size:2.2rem;flex-shrink:0;">${weatherEmoji(w.code)}</div>
+      <div style="flex:1;">
+        <div style="display:flex;align-items:baseline;gap:6px;">
+          <div class="weather-temp">${w.temp?.toFixed(1)}°</div>
+          <div style="font-size:0.78rem;color:var(--muted);">Montpellier</div>
+        </div>
+        <div class="weather-detail">
+          💨 ${w.wind?.toFixed(0)} km/h · 🌧 ${w.rain?.toFixed(1)} mm<br>
+          ${wetsuitTxt}
+          ${heatNote}
+        </div>
+      </div>
+    </div>`;
+
+  // Store heat factor globally for pace adjustments
+  window._heatAdj = w.temp >= 25 ? 1 + (w.temp - 25) / 5 * 0.05 : 1;
+}
+
+// ===== VO2MAX ESTIMATION =====
+function estimateVO2max() {
+  const mv = getMetrics();
+  // Method 1: Fox formula from HR (if hrMax + hrRest set)
+  if (mv.hrMax && mv.hrRest && mv.hrRest > 0) {
+    return Math.round(15 * mv.hrMax / mv.hrRest);
+  }
+  // Method 2: Daniels from best run activity
+  const runs = activities.filter(a => {
+    const t = a.sport_type || a.type || '';
+    return ['Run','TrailRun'].includes(t) && a.moving_time > 600 && a.distance > 1000;
+  });
+  if (!runs.length) return null;
+  const best = runs.reduce((b, a) => (a.distance / a.moving_time > b.distance / b.moving_time ? a : b));
+  const v = best.distance / best.moving_time * 60; // m/min
+  const t = best.moving_time / 60; // min
+  const pctVO2 = 0.8 + 0.1894393 * Math.exp(-0.012778 * t) + 0.2989558 * Math.exp(-0.1932605 * t);
+  const vo2AtV = -4.60 + 0.182258 * v + 0.000104 * v * v;
+  return Math.round(vo2AtV / pctVO2);
+}
+
+// ===== BRICK DETECTOR =====
+function detectBricks() {
+  const getType = a => a.sport_type || a.type || '';
+  const isBike = t => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+  const isRun = t => ['Run','TrailRun'].includes(t);
+  const sorted = [...activities].sort((a,b) => new Date(a.start_date) - new Date(b.start_date));
+  const bricks = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i], b = sorted[i+1];
+    if (!isBike(getType(a)) || !isRun(getType(b))) continue;
+    const endA = new Date(a.start_date).getTime() + (a.elapsed_time || a.moving_time) * 1000;
+    const startB = new Date(b.start_date).getTime();
+    const gapMin = (startB - endA) / 60000;
+    if (gapMin >= 0 && gapMin <= 30) {
+      bricks.push({ bike: a, run: b, gapMin: Math.round(gapMin) });
+    }
+  }
+  return bricks;
+}
+
+// ===== PLATEAU DETECTOR =====
+function detectPlateau() {
+  const now = new Date();
+  const cut2w = new Date(now - 14 * 86400000);
+  const cut6w = new Date(now - 42 * 86400000);
+  const getType = a => a.sport_type || a.type || '';
+  const isRun = t => ['Run','TrailRun'].includes(t);
+
+  const recent = activities.filter(a => new Date(a.start_date) >= cut2w);
+  const older = activities.filter(a => { const d = new Date(a.start_date); return d >= cut6w && d < cut2w; });
+
+  const avgRunSpd = arr => {
+    const runs = arr.filter(a => isRun(getType(a)) && a.moving_time > 0 && a.distance > 0);
+    return runs.length ? runs.reduce((s, a) => s + a.distance / a.moving_time, 0) / runs.length : 0;
+  };
+  const r2 = avgRunSpd(recent), r6 = avgRunSpd(older);
+  const pct = r6 > 0 ? (r2 / r6 - 1) * 100 : null;
+  return { plateau: pct !== null && Math.abs(pct) < 2, pct, r2, r6 };
+}
+
+// ===== BIKE EFFICIENCY (EF = avg_watts / avg_HR) =====
+function getBikeEfficiency() {
+  const getType = a => a.sport_type || a.type || '';
+  const isBike = t => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+  return activities
+    .filter(a => isBike(getType(a)) && a.average_watts > 0 && a.average_heartrate > 0)
+    .sort((a,b) => new Date(a.start_date) - new Date(b.start_date))
+    .map(a => ({
+      date: new Date(a.start_date).toLocaleDateString('fr-FR',{day:'numeric',month:'short'}),
+      ef: +(a.average_watts / a.average_heartrate).toFixed(3),
+      watts: Math.round(a.average_watts),
+      hr: Math.round(a.average_heartrate)
+    }));
+}
+
+// ===== POST-SEANCE ANALYSIS =====
+function analyzeActivity(a) {
+  const mv = getMetrics();
+  const getType = x => x.sport_type || x.type || '';
+  const t = getType(a);
+  const isRun = ['Run','TrailRun'].includes(t);
+  const isBike = ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
+  const isSwim = t === 'Swim';
+  const mps = a.moving_time > 0 && a.distance > 0 ? a.distance / a.moving_time : 0;
+
+  const points = [], warnings = [];
+
+  // Duration analysis
+  const min = Math.round(a.moving_time / 60);
+  if (min >= 60) points.push(`Bonne durée de séance (${fmtDur(min)})`);
+  else if (min < 20) warnings.push(`Séance courte (${min}min) — vise 30min minimum pour l'endurance de base`);
+
+  // HR analysis
+  if (a.average_heartrate) {
+    const hrMax = mv.hrMax || 185;
+    const hrPct = Math.round(a.average_heartrate / hrMax * 100);
+    const zone = hrPct < 60 ? 'Z1' : hrPct < 70 ? 'Z2' : hrPct < 80 ? 'Z3' : hrPct < 90 ? 'Z4' : 'Z5';
+    if (zone === 'Z2' || zone === 'Z1') points.push(`FC en ${zone} (${Math.round(a.average_heartrate)}bpm, ${hrPct}% FCmax) — zone d'endurance aérobie optimale`);
+    else if (zone === 'Z4' || zone === 'Z5') warnings.push(`FC élevée en ${zone} (${Math.round(a.average_heartrate)}bpm, ${hrPct}% FCmax) — séance intensive, assure-toi de bien récupérer`);
+    else points.push(`FC en ${zone} (${Math.round(a.average_heartrate)}bpm, ${hrPct}% FCmax)`);
+  }
+
+  // Pace vs target
+  if (isRun && mps > 0 && mv.runPace703 > 0) {
+    const targetMps = 1000 / (mv.runPace703 * 60);
+    const ratio = mps / targetMps;
+    if (ratio >= 0.95 && ratio <= 1.05) points.push(`Allure proche de la cible 70.3 (${formatPace(mps)}/km vs ${fmtDecPace(mv.runPace703)}/km)`);
+    else if (ratio > 1.05) warnings.push(`Allure ${formatPace(mps)}/km plus rapide que la cible 70.3 (${fmtDecPace(mv.runPace703)}/km) — garde de l'énergie pour la course`);
+  }
+  if (isBike && mps > 0 && mv.bikePace > 0) {
+    const kmh = mps * 3.6;
+    const ratio = kmh / mv.bikePace;
+    if (ratio >= 0.92) points.push(`Vitesse vélo (${kmh.toFixed(1)}km/h) proche ou au-dessus de la cible 70.3`);
+  }
+  if (isSwim && mps > 0 && mv.swimPace > 0) {
+    const targetMps = 100 / (mv.swimPace * 60);
+    const ratio = mps / targetMps;
+    if (ratio >= 0.95) points.push(`Allure natation ${formatPace(mps*10)}/100m proche de la cible`);
+  }
+
+  // Distance
+  if (isRun && a.distance >= 15000) points.push(`Longue sortie course (${(a.distance/1000).toFixed(1)}km) — excellente base d'endurance`);
+  if (isBike && a.distance >= 60000) points.push(`Sortie vélo longue distance (${(a.distance/1000).toFixed(0)}km)`);
+  if (isSwim && a.distance >= 2500) points.push(`Volume natation élevé (${(a.distance/1000).toFixed(1)}km) — préparation solide pour le 1.9km`);
+
+  if (!points.length && !warnings.length) points.push(`Séance enregistrée — continue à être régulier !`);
+  return { points, warnings };
+}
+
+// ===== TOGGLE ACTIVITY DETAIL =====
+function toggleActivityDetail(idx) {
+  const el = document.getElementById('actDetail-' + idx);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  const a = activities[idx];
+  const analysis = analyzeActivity(a);
+  const pointsHtml = analysis.points.map(p => `<div style="font-size:0.78rem;padding:2px 0;color:var(--run);">✅ ${p}</div>`).join('');
+  const warnHtml = analysis.warnings.map(w => `<div style="font-size:0.78rem;padding:2px 0;color:var(--danger);">⚠️ ${w}</div>`).join('');
+  el.innerHTML = `
+    <div style="margin-bottom:8px;">${pointsHtml}${warnHtml}</div>
+    <button onclick="showShareCard(${idx});event.stopPropagation();" style="background:var(--surface);color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:0.3rem 0.75rem;font-size:0.75rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;">📤 Partager</button>`;
+  el.style.display = 'block';
+}
+
+// ===== SHARE ACTIVITY CARD =====
+function showShareCard(actIdx) {
+  const a = activities[actIdx];
+  if (!a) return;
+  const getType = x => x.sport_type || x.type || '';
+  const t = getType(a);
+  const mps = a.moving_time > 0 && a.distance > 0 ? a.distance / a.moving_time : 0;
+  const colorMap = { Swim:'#00b4d8', Ride:'#f77f00', VirtualRide:'#f77f00', Run:'#06d6a0', TrailRun:'#06d6a0', MountainBikeRide:'#f77f00', GravelRide:'#f77f00', EBikeRide:'#f77f00' };
+  const color = colorMap[t] || '#c77dff';
+  const icons = { Swim:'🏊', Ride:'🚴', VirtualRide:'🚴', Run:'🏃', TrailRun:'🏃', MountainBikeRide:'🚴', GravelRide:'🚴', EBikeRide:'🚴' };
+  const escapeHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const d = new Date(a.start_date_local || a.start_date);
+  const ds = isNaN(d) ? '' : d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const dist = a.distance > 0 ? (a.distance/1000).toFixed(1) + 'km' : '';
+  let paceStr = '';
+  if (mps > 0) {
+    if (['Run','TrailRun'].includes(t)) paceStr = formatPace(mps) + '/km';
+    else if (t === 'Swim') paceStr = formatPace(mps*10) + '/100m';
+    else paceStr = (mps*3.6).toFixed(1) + 'km/h';
+  }
+
+  const container = document.getElementById('shareCardContainer');
+  container.innerHTML = `
+    <div class="share-card" id="theShareCard" style="display:block;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <div style="font-size:0.7rem;color:#666;letter-spacing:1px;text-transform:uppercase;">TriCoach AI</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:${color};letter-spacing:1px;margin-top:2px;">${icons[t]||'⚡'} ${escapeHtml(a.name)||'Séance'}</div>
+        </div>
+        <div style="font-size:0.72rem;color:#555;text-align:right;">${ds}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1rem;">
+        ${dist ? `<div style="text-align:center;"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:${color};">${dist}</div><div style="font-size:0.65rem;color:#555;text-transform:uppercase;">Distance</div></div>` : ''}
+        <div style="text-align:center;"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:${color};">${fmtDur(Math.round(a.moving_time/60))}</div><div style="font-size:0.65rem;color:#555;text-transform:uppercase;">Durée</div></div>
+        ${paceStr ? `<div style="text-align:center;"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${color};">${paceStr}</div><div style="font-size:0.65rem;color:#555;text-transform:uppercase;">Allure</div></div>` : ''}
+        ${a.average_heartrate ? `<div style="text-align:center;"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:#ff4d6d;">${Math.round(a.average_heartrate)}</div><div style="font-size:0.65rem;color:#555;text-transform:uppercase;">FC moy.</div></div>` : ''}
+      </div>
+      <div style="border-top:1px solid #222;padding-top:0.75rem;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:0.7rem;color:#444;">🏊🚴🏃 Triathlon 70.3 — Juin 2026</div>
+        <div style="font-size:0.7rem;color:#444;">tricoach.vercel.app</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button onclick="doShare(${actIdx})" style="flex:1;background:var(--accent);color:white;border:none;border-radius:8px;padding:0.6rem;font-size:0.82rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;">📤 Partager</button>
+      <button onclick="document.getElementById('shareCardContainer').innerHTML=''" style="background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:0.6rem 1rem;font-size:0.82rem;font-family:'DM Sans',sans-serif;cursor:pointer;">✕</button>
+    </div>`;
+  container.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+function doShare(actIdx) {
+  const a = activities[actIdx];
+  const escapeHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const text = `${escapeHtml(a.name||'Séance')} · ${(a.distance/1000).toFixed(1)}km en ${fmtDur(Math.round(a.moving_time/60))} · #triathlon #70point3 via TriCoach AI`;
+  if (navigator.share) {
+    navigator.share({ title:'TriCoach AI', text, url:'https://tricoach.vercel.app' }).catch(()=>{});
+  } else {
+    navigator.clipboard?.writeText(text).then(() => alert('Stats copiées dans le presse-papiers !'));
+  }
+}
+
+// ===== ICS DOWNLOAD =====
+function parseDurToMin(durStr) {
+  if (!durStr) return 60;
+  const h = durStr.match(/(\d+)h/); const m = durStr.match(/(\d+)min/);
+  return (h ? parseInt(h[1]) * 60 : 0) + (m ? parseInt(m[1]) : 0) || 60;
+}
+
+function downloadICS() {
+  try {
+    const analysis = analyzeAthleteData();
+    const plan = buildTrainingWeek(analysis);
+    const now = new Date();
+    const monday = new Date(now);
+    const day = monday.getDay();
+    const diff = day === 0 ? 1 : (8 - day) % 7 || 7;
+    monday.setDate(monday.getDate() + diff);
+    monday.setHours(0,0,0,0);
+
+    const pad = n => String(n).padStart(2,'0');
+    const dtFmt = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+    const sportHour = { swim:7, bike:9, run:7, brick:8, rest:0 };
+
+    const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//TriCoach AI//FR','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
+
+    plan.days.forEach((d, i) => {
+      if (d.type === 'rest') return;
+      const start = new Date(monday); start.setDate(monday.getDate() + i);
+      start.setHours(sportHour[d.type] || 7, 0, 0, 0);
+      const durMin = parseDurToMin(d.duration);
+      const end = new Date(start.getTime() + durMin * 60000);
+      const uid = `tricoach-${Date.now()}-${i}@tricoach`;
+      const desc = d.desc.replace(/,/g,'\\,').replace(/\n/g,'\\n');
+      lines.push('BEGIN:VEVENT',`UID:${uid}`,`DTSTART:${dtFmt(start)}`,`DTEND:${dtFmt(end)}`,`SUMMARY:TriCoach — ${d.title}`,`DESCRIPTION:${desc}`,`CATEGORIES:TRIATHLON,${d.type.toUpperCase()}`,'END:VEVENT');
+    });
+    lines.push('END:VCALENDAR');
+
+    const blob = new Blob([lines.join('\r\n')], { type:'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; link.download = 'tricoach_programme.ics'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch(e) { alert('Erreur lors de la génération du fichier ICS.'); }
+}
+
+// ===== RACE TAB RENDER =====
+function renderRaceTab() {
+  const mv = getMetrics();
+  const a = activities.length ? analyzeAthleteData() : null;
+  const vo2 = estimateVO2max();
+  const bricks = detectBricks();
+  const plateau = a ? detectPlateau() : null;
+
+  // Benchmarks
+  const benchmarks = [
+    { label:'Sub-4h', swimPaceSec:85, bikeKmh:38, runPaceSec:255, totalMin:240 },
+    { label:'Sub-5h', swimPaceSec:100, bikeKmh:32, runPaceSec:285, totalMin:300 },
+    { label:'Sub-6h', swimPaceSec:115, bikeKmh:27, runPaceSec:320, totalMin:360 },
+    { label:'Sub-7h', swimPaceSec:135, bikeKmh:23, runPaceSec:360, totalMin:420 },
+  ];
+  const athleteSwimMps = a?.avgSwimSpeed || 0;
+  const athleteBikeMps = a?.avgBikeSpeed || 0;
+  const athleteRunMps  = a?.avgRunSpeed  || 0;
+  const fmtPaceSec = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+
+  const benchRows = benchmarks.map(b => {
+    const sBike = b.bikeKmh / 3.6;
+    const swimT = Math.round(1900 / (100/b.swimPaceSec));
+    const bikeT = Math.round(90000 / sBike);
+    const runT  = Math.round(21100 / (1000/b.runPaceSec));
+    return `<tr><td><strong>${b.label}</strong></td><td>${fmtPaceSec(b.swimPaceSec)}/100m</td><td>${b.bikeKmh}km/h</td><td>${fmtPaceSec(b.runPaceSec)}/km</td><td>${fmtSecs(swimT+bikeT+runT+300)}</td></tr>`;
+  }).join('');
+
+  const athleteSwimStr = athleteSwimMps > 0 ? formatPace(athleteSwimMps*10)+'/100m' : (mv.swimPace > 0 ? fmtDecPace(mv.swimPace)+'/100m' : '—');
+  const athleteBikeStr = athleteBikeMps > 0 ? (athleteBikeMps*3.6).toFixed(0)+'km/h' : (mv.bikePace > 0 ? mv.bikePace.toFixed(0)+'km/h' : '—');
+  const athleteRunStr  = athleteRunMps  > 0 ? formatPace(athleteRunMps)+'/km' : (mv.runPace703 > 0 ? fmtDecPace(mv.runPace703)+'/km' : '—');
+
+  const swimMps = athleteSwimMps || (mv.swimPace > 0 ? 100/(mv.swimPace*60) : 0);
+  const bikeMps = athleteBikeMps || (mv.bikePace > 0 ? mv.bikePace/3.6 : 0);
+  const runMps  = athleteRunMps  || (mv.runPace703 > 0 ? 1000/(mv.runPace703*60) : 0);
+  const predTotal = (swimMps && bikeMps && runMps) ? Math.round(1900/swimMps + 90000/bikeMps + 21100/runMps + 300) : 0;
+
+  document.getElementById('raceContent').innerHTML = `
+    <!-- SIMULATEUR 70.3 -->
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:0.85rem;">🏁 Simulateur 70.3</div>
+      <div class="sim-row"><span class="sim-label">🏊 Natation 1.9km</span><input class="sim-input" id="simSwimH" type="number" min="0" max="3" value="0" placeholder="h"><span class="sim-unit">h</span><input class="sim-input" id="simSwimM" type="number" min="0" max="59" value="38" placeholder="min"><span class="sim-unit">min</span></div>
+      <div class="sim-row"><span class="sim-label">↔ T1</span><input class="sim-input" id="simT1" type="number" min="0" max="20" value="3"><span class="sim-unit">min</span></div>
+      <div class="sim-row"><span class="sim-label">🚴 Vélo 90km</span><input class="sim-input" id="simBikeH" type="number" min="0" max="6" value="2" placeholder="h"><span class="sim-unit">h</span><input class="sim-input" id="simBikeM" type="number" min="0" max="59" value="45" placeholder="min"><span class="sim-unit">min</span></div>
+      <div class="sim-row"><span class="sim-label">↔ T2</span><input class="sim-input" id="simT2" type="number" min="0" max="20" value="2"><span class="sim-unit">min</span></div>
+      <div class="sim-row"><span class="sim-label">🏃 Course 21.1km</span><input class="sim-input" id="simRunH" type="number" min="0" max="4" value="1" placeholder="h"><span class="sim-unit">h</span><input class="sim-input" id="simRunM" type="number" min="0" max="59" value="45" placeholder="min"><span class="sim-unit">min</span></div>
+      <button onclick="runSimulator()" style="width:100%;background:var(--accent);color:white;border:none;border-radius:8px;padding:0.65rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:0.5rem;">Calculer</button>
+      <div id="simResult" style="margin-top:0.75rem;"></div>
+    </div>
+
+    <!-- PACING STRATEGY -->
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--swim);text-transform:uppercase;letter-spacing:1px;margin-bottom:0.85rem;">📐 Stratégie d'allures (negative split)</div>
+      <div class="sim-row"><span class="sim-label">Objectif total</span><input class="sim-input" id="pacingH" type="number" min="3" max="10" value="5"><span class="sim-unit">h</span><input class="sim-input" id="pacingM" type="number" min="0" max="59" value="0"><span class="sim-unit">min</span></div>
+      <button onclick="runPacing()" style="width:100%;background:var(--swim);color:white;border:none;border-radius:8px;padding:0.65rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:0.5rem;">Calculer les allures</button>
+      <div id="pacingResult" style="margin-top:0.75rem;"></div>
+    </div>
+
+    <!-- NUTRITION -->
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--run);text-transform:uppercase;letter-spacing:1px;margin-bottom:0.85rem;">🍌 Calculateur nutrition course</div>
+      <div class="sim-row"><span class="sim-label">Durée estimée</span><input class="sim-input" id="nutrH" type="number" min="1" max="10" value="${predTotal > 0 ? Math.floor(predTotal/3600) : 5}"><span class="sim-unit">h</span><input class="sim-input" id="nutrM" type="number" min="0" max="59" value="${predTotal > 0 ? Math.floor((predTotal%3600)/60) : 0}"><span class="sim-unit">min</span></div>
+      <div class="sim-row"><span class="sim-label">Intensité</span>
+        <select id="nutrInt" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.3rem 0.5rem;font-size:0.82rem;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+          <option value="low">Modérée (Z2)</option>
+          <option value="med" selected>Soutenue (Z3)</option>
+          <option value="high">Intense (Z4+)</option>
+        </select>
+      </div>
+      <button onclick="runNutrition()" style="width:100%;background:var(--run);color:white;border:none;border-radius:8px;padding:0.65rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:0.5rem;">Calculer</button>
+      <div id="nutrResult" style="margin-top:0.75rem;"></div>
+    </div>
+
+    <!-- BENCHMARKING -->
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:0.85rem;">📊 Benchmarking 70.3</div>
+      <div style="overflow-x:auto;">
+        <table class="bench-table">
+          <thead><tr><th>Profil</th><th>Nat.</th><th>Vélo</th><th>Course</th><th>Total</th></tr></thead>
+          <tbody>
+            ${benchRows}
+            <tr class="athlete-row"><td>Toi</td><td>${athleteSwimStr}</td><td>${athleteBikeStr}</td><td>${athleteRunStr}</td><td>${predTotal > 0 ? fmtSecs(predTotal) : '—'}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- VO2MAX + BRICKS + PLATEAU -->
+    ${vo2 ? `<div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🫁 VO2max estimé</div>
+      <div style="font-size:2rem;font-family:'Bebas Neue',sans-serif;color:var(--accent);">${vo2} <span style="font-size:0.9rem;color:var(--muted);">ml/kg/min</span></div>
+      <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">${vo2 >= 60 ? 'Excellent — niveau élite AG' : vo2 >= 50 ? 'Très bon — compétitif AG' : vo2 >= 40 ? 'Bon — finisher 70.3 confortable' : 'En développement — continue le volume Z2'}</div>
+    </div>` : ''}
+
+    ${bricks.length ? `<div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--bike);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">🧱 Séances Brick détectées (${bricks.length})</div>
+      ${bricks.slice(0,5).map(b => {
+        const bikeMps2 = b.bike.moving_time > 0 && b.bike.distance > 0 ? b.bike.distance/b.bike.moving_time : 0;
+        const runMps2  = b.run.moving_time  > 0 && b.run.distance  > 0 ? b.run.distance/b.run.moving_time   : 0;
+        const d = new Date(b.bike.start_date); const ds = isNaN(d)?'':d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+        return `<div style="font-size:0.78rem;padding:0.4rem 0;border-bottom:1px solid var(--border);">
+          <span style="color:var(--bike);">🚴 ${(b.bike.distance/1000).toFixed(0)}km${bikeMps2>0?' · '+(bikeMps2*3.6).toFixed(0)+'km/h':''}</span>
+          <span style="color:var(--muted);margin:0 6px;">→ T${b.gapMin}min →</span>
+          <span style="color:var(--run);">🏃 ${(b.run.distance/1000).toFixed(1)}km${runMps2>0?' · '+formatPace(runMps2)+'/km':''}</span>
+          <span style="color:var(--muted);font-size:0.7rem;float:right;">${ds}</span>
+        </div>`;
+      }).join('')}
+    </div>` : `<div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:1rem;opacity:0.6;">
+      <div style="font-size:0.75rem;font-weight:600;color:var(--bike);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">🧱 Brick detector</div>
+      <div style="font-size:0.8rem;color:var(--muted);">Aucune séance brick détectée (vélo suivi d'une course dans les 30min).</div>
+    </div>`}
+
+    ${plateau ? `<div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid ${plateau.plateau ? 'rgba(255,77,109,0.3)' : 'var(--border)'};margin-bottom:1rem;">
+      <div style="font-size:0.75rem;font-weight:600;color:${plateau.plateau ? 'var(--danger)' : 'var(--run)'};text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${plateau.plateau ? '⚠️ Plateau détecté' : '📈 Progression continue'}</div>
+      <div style="font-size:0.82rem;color:var(--text);">${plateau.pct !== null ? (plateau.plateau ? `Allure course stable depuis >3 semaines (variation ${plateau.pct > 0 ? '+' : ''}${plateau.pct?.toFixed(1)}%). Varie tes stimuli : intervalles, côtes, sortie longue.` : `Progression de ${plateau.pct > 0 ? '+' : ''}${plateau.pct?.toFixed(1)}% sur la course vs les 4 semaines précédentes.`) : 'Pas assez de données de course pour l\'analyse.'}</div>
+    </div>` : ''}
+  `;
+}
+
+function runSimulator() {
+  const get = id => parseInt(document.getElementById(id)?.value || 0) || 0;
+  const swimSec = get('simSwimH')*3600 + get('simSwimM')*60;
+  const t1Sec = get('simT1') * 60;
+  const bikeSec = get('simBikeH')*3600 + get('simBikeM')*60;
+  const t2Sec = get('simT2') * 60;
+  const runSec = get('simRunH')*3600 + get('simRunM')*60;
+  if (!swimSec || !bikeSec || !runSec) { document.getElementById('simResult').innerHTML = '<div style="font-size:0.8rem;color:var(--danger);">Remplis tous les champs.</div>'; return; }
+
+  const total = swimSec + t1Sec + bikeSec + t2Sec + runSec;
+  const swimPace = formatPace(1900 / swimSec * 10) + '/100m';
+  const bikeKmh = (90000 / bikeSec * 3.6).toFixed(1) + 'km/h';
+  const runPace = formatPace(21100 / runSec) + '/km';
+
+  const analysis = total < 14400 ? '🔥 Objectif ambitieux — niveau sub-4h !' :
+                   total < 18000 ? '💪 Bon objectif — niveau sub-5h' :
+                   total < 21600 ? '✅ Objectif réaliste — niveau sub-6h' : '🎯 Objectif de finisher — profite de la course !';
+
+  document.getElementById('simResult').innerHTML = `
+    <div style="background:var(--surface2);border-radius:8px;padding:0.75rem;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--accent);margin-bottom:4px;">${fmtSecs(total)}</div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;">${analysis}</div>
+      <div style="font-size:0.75rem;line-height:1.8;">🏊 ${fmtSecs(swimSec)} (${swimPace}) · T1 ${fmtSecs(t1Sec)}<br>🚴 ${fmtSecs(bikeSec)} (${bikeKmh}) · T2 ${fmtSecs(t2Sec)}<br>🏃 ${fmtSecs(runSec)} (${runPace})</div>
+    </div>`;
+}
+
+function runPacing() {
+  const h = parseInt(document.getElementById('pacingH')?.value || 5) || 5;
+  const m = parseInt(document.getElementById('pacingM')?.value || 0) || 0;
+  const totalSec = h * 3600 + m * 60;
+  // Distribution standard 70.3: swim 11%, T1 1.5%, bike 51%, T2 1%, run 35.5%
+  const swimSec = Math.round(totalSec * 0.11);
+  const t1Sec   = Math.round(totalSec * 0.015);
+  const bikeSec = Math.round(totalSec * 0.51);
+  const t2Sec   = Math.round(totalSec * 0.01);
+  const runSec  = Math.round(totalSec * 0.355);
+  // Negative split recommendations
+  const swimPace = formatPace(1900/swimSec * 10) + '/100m';
+  const bikeKmh = (90000/bikeSec*3.6).toFixed(1);
+  const runPace = formatPace(21100/runSec);
+
+  document.getElementById('pacingResult').innerHTML = `
+    <div style="background:var(--surface2);border-radius:8px;padding:0.75rem;font-size:0.78rem;line-height:1.9;">
+      <div style="font-weight:600;margin-bottom:6px;">Allures pour ${h}h${m > 0 ? String(m).padStart(2,'0') : ''} :</div>
+      <div>🏊 Natation : <strong>${fmtSecs(swimSec)}</strong> → <strong>${swimPace}</strong></div>
+      <div>↔ T1 cible : <strong>${fmtSecs(t1Sec)}</strong></div>
+      <div>🚴 Vélo : <strong>${fmtSecs(bikeSec)}</strong> → <strong>${bikeKmh}km/h</strong></div>
+      <div>↔ T2 cible : <strong>${fmtSecs(t2Sec)}</strong></div>
+      <div>🏃 Course : <strong>${fmtSecs(runSec)}</strong> → <strong>${runPace}/km</strong></div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--muted);">💡 Negative split : vélo à 90-95% les 45 premiers km, course 1ère mi à allure cible, accélère sur le retour si possible.</div>
+    </div>`;
+}
+
+function runNutrition() {
+  const h = parseInt(document.getElementById('nutrH')?.value || 5) || 5;
+  const m = parseInt(document.getElementById('nutrM')?.value || 0) || 0;
+  const intensity = document.getElementById('nutrInt')?.value || 'med';
+  const durMin = h * 60 + m;
+  const mv = getMetrics();
+  const weight = mv.weight || 70;
+
+  const choPerH = intensity === 'low' ? 50 : intensity === 'med' ? 70 : 90;
+  const totalCHO = Math.round(choPerH * durMin / 60);
+  const gels = Math.ceil(totalCHO / 25); // ~25g CHO per gel
+  const water = Math.round(0.6 * durMin / 60 * 1000); // 600ml/h
+  const sodium = Math.round(700 * durMin / 60); // 700mg/h
+  const caloriesBurn = Math.round(weight * 0.14 * durMin); // rough estimate
+
+  document.getElementById('nutrResult').innerHTML = `
+    <div class="nutr-result">
+      <div class="nutr-item"><span>⚡ Glucides nécessaires</span><span class="nutr-val">${totalCHO}g (${choPerH}g/h)</span></div>
+      <div class="nutr-item"><span>🟡 Gels (~25g CHO)</span><span class="nutr-val">${gels} gels</span></div>
+      <div class="nutr-item"><span>💧 Eau estimée</span><span class="nutr-val">${(water/1000).toFixed(1)}L</span></div>
+      <div class="nutr-item"><span>🧂 Sodium</span><span class="nutr-val">${sodium}mg</span></div>
+      <div class="nutr-item"><span>🔥 Calories brûlées (~${weight}kg)</span><span class="nutr-val">${caloriesBurn} kcal</span></div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:8px;">💡 Commence à t'alimenter dès la 30ème minute de vélo. Alterne solide et liquide. Teste en entraînement avant la course.</div>
+    </div>`;
 }
 
 function disconnect() {
