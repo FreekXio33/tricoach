@@ -307,6 +307,7 @@
     <div id="dashLoading" class="spinner"></div>
     <div id="dashContent" style="display:none;">
       <div id="weatherWidget"></div>
+      <div id="weeklyGoalsWidget"></div>
       <div class="goal-banner">
         <div class="goal-icon">🏆</div>
         <div>
@@ -451,9 +452,15 @@
 const CLIENT_ID = '212070';
 const CLIENT_SECRET = '5b4da95861b3d717348847f7de353fd3f16c1a03';
 const REDIRECT_URI = window.location.origin + window.location.pathname;
+// ===== SUPABASE =====
+const SB_URL = 'https://chhbbiulgtknprpdzxth.supabase.co';
+const SB_KEY = 'sb_publishable_8tr_6sVVnKCS8JaACL-Udw_IBE9ljPe';
+let _sb = null;       // supabase client instance
+let _sbReady = false; // tables confirmed to exist
 // ===== STATE =====
 let athlete = null;
 let activities = [];
+let _sbSyncing = false; // prevent concurrent syncs
 
 // ===== INIT =====
 window.addEventListener('load', async () => {
@@ -531,6 +538,7 @@ async function loadApp(token) {
   document.getElementById('semiDaysLeft').textContent = Math.ceil((semiDate - new Date()) / 86400000);
 
   await fetchActivities(token.access_token);
+  initSupabase(); // async, non-blocking
   checkMorningNotification();
 }
 
@@ -609,6 +617,7 @@ function renderDashboard() {
   // Forme du jour
   renderFormeDuJour();
   renderWeatherWidget();
+  renderWeeklyGoalsWidget();
 
   // Streak
   const streak = calcStreak();
@@ -766,16 +775,22 @@ function generatePlan() {
       document.getElementById('planLoading').style.display = 'none';
       document.getElementById('regenBtn').disabled = false;
 
-      document.getElementById('weekPlan').innerHTML = plan.days.map(d => `
-        <div class="day-card ${d.type === 'rest' ? 'rest' : ''}">
+      document.getElementById('weekPlan').innerHTML = plan.days.map((d, i) => {
+        const today = new Date().toISOString().split('T')[0];
+        const isDone = localStorage.getItem(`done_${today}_${i}`) === '1';
+        return `<div class="day-card ${d.type === 'rest' ? 'rest' : ''}" id="dayCard-${i}">
           <div class="day-label">${d.day}</div>
           <div class="day-stripe ${d.type}"></div>
           <div class="day-info">
             <div class="day-title">${d.title}</div>
             <div class="day-desc">${d.desc}</div>
           </div>
-          ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
-        </div>`).join('');
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            ${d.duration ? `<div class="day-duration">${d.duration}</div>` : ''}
+            ${d.type !== 'rest' ? `<button onclick="markDayDone(${i},'${d.title.replace(/'/g,'').replace(/"/g,'')}','${d.type}')" style="background:${isDone?'var(--run)':'var(--surface2)'};color:${isDone?'white':'var(--muted)'};border:1px solid ${isDone?'transparent':'var(--border)'};border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">${isDone?'✓ Fait':'Valider'}</button>` : ''}
+          </div>
+        </div>`;
+      }).join('');
 
       const noteEl = document.getElementById('coachNote');
       noteEl.innerHTML = `<span style="color:var(--accent);font-weight:500;">📊 Analyse</span><br>${plan.note}`;
@@ -1156,7 +1171,7 @@ function getMetrics() {
   };
 }
 
-function saveMetrics() {
+async function saveMetrics() {
   const fields = ['weight','height','ftp','hrMax','hrRest','vma','swimPace','bikePace','runPace703','runPaceSemi'];
   fields.forEach(f => {
     const el = document.getElementById('m_' + f);
@@ -1168,6 +1183,7 @@ function saveMetrics() {
   const btn = document.getElementById('saveMetricsBtn');
   if (btn) { btn.textContent = '✅ Sauvegardé'; setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; }, 2000); }
   renderMetricZones();
+  if (_sbReady) sbSaveProfile();
 }
 
 function fmtDecPace(v) {
@@ -1315,6 +1331,23 @@ function renderProfil() {
       <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">RAPPELS D'ENTRAÎNEMENT</div>
       <div style="font-size:0.84rem;margin-bottom:0.75rem;line-height:1.5;">Reçois une notification chaque matin à 7h avec ta séance du jour.<br><span style="font-size:0.72rem;color:var(--muted);">Sur iPhone : ajoute l'app à l'écran d'accueil (Partager → Sur l'écran d'accueil) puis active.</span></div>
       <button id="notifBtn" onclick="setupNotifications()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:0.6rem 1.2rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">🔔 Activer les rappels</button>
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-top:1rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.6rem;">
+        <div style="font-size:0.78rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px;">☁️ Supabase Sync</div>
+        <div id="sbStatus" style="font-size:0.72rem;color:var(--muted);">${_sbReady ? '☁️ Synchronisé' : '📴 Hors ligne'}</div>
+      </div>
+      ${localStorage.getItem('sb_needs_setup') === '1' ? `
+        <div style="background:rgba(247,127,0,0.1);border:1px solid rgba(247,127,0,0.25);border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;">
+          <div style="font-size:0.78rem;font-weight:600;color:var(--bike);margin-bottom:6px;">⚙️ Première configuration requise</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:8px;line-height:1.5;">Les tables Supabase n'existent pas encore. Exécute ce SQL dans le dashboard :</div>
+          <a href="https://supabase.com/dashboard/project/chhbbiulgtknprpdzxth/sql/new" target="_blank" style="display:block;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.65rem;color:var(--muted);font-family:monospace;overflow-x:auto;white-space:pre;margin-bottom:8px;text-decoration:none;">${SETUP_SQL.substring(0, 200)}…</a>
+          <div style="display:flex;gap:8px;">
+            <a href="https://supabase.com/dashboard/project/chhbbiulgtknprpdzxth/sql/new" target="_blank" style="flex:1;background:var(--bike);color:white;border:none;border-radius:6px;padding:0.5rem;font-size:0.78rem;font-weight:600;text-align:center;text-decoration:none;display:block;">Ouvrir SQL Editor</a>
+            <button id="sbVerifyBtn" onclick="sbVerifySetup()" style="flex:1;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.78rem;font-family:'DM Sans',sans-serif;cursor:pointer;">Vérifier la connexion</button>
+          </div>
+        </div>` : ''}
+      ${_sbReady ? `<button onclick="sbSaveProfile().then(()=>{})" style="background:var(--surface);color:var(--run);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.85rem;font-size:0.75rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">↻ Forcer la synchronisation</button>` : ''}
     </div>
     <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-top:1rem;">
       <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem;">MODE D'AFFICHAGE</div>
@@ -2206,6 +2239,345 @@ function runNutrition() {
       <div class="nutr-item"><span>🔥 Calories brûlées (~${weight}kg)</span><span class="nutr-val">${caloriesBurn} kcal</span></div>
       <div style="font-size:0.7rem;color:var(--muted);margin-top:8px;">💡 Commence à t'alimenter dès la 30ème minute de vélo. Alterne solide et liquide. Teste en entraînement avant la course.</div>
     </div>`;
+}
+
+// ===== SUPABASE INTEGRATION =====
+const SETUP_SQL = `-- Colle ce SQL dans Supabase → SQL Editor → Run
+CREATE TABLE IF NOT EXISTS athlete_profile (
+  athlete_id BIGINT PRIMARY KEY, strava_name TEXT,
+  weight DECIMAL, height DECIMAL, ftp INTEGER,
+  hr_max INTEGER, hr_rest INTEGER, vma DECIMAL,
+  swim_pace DECIMAL, bike_pace DECIMAL,
+  run_pace_703 DECIMAL, run_pace_semi DECIMAL,
+  theme TEXT DEFAULT 'auto', updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE athlete_profile DISABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS workout_completions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  athlete_id BIGINT NOT NULL, date DATE NOT NULL,
+  workout_title TEXT, workout_type TEXT, notes TEXT,
+  completed_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE workout_completions DISABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS workout_schedule (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  athlete_id BIGINT NOT NULL, week_start DATE NOT NULL,
+  day_index INTEGER NOT NULL, workout_type TEXT,
+  workout_title TEXT, workout_desc TEXT, duration TEXT,
+  UNIQUE(athlete_id, week_start, day_index)
+);
+ALTER TABLE workout_schedule DISABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS weekly_goals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  athlete_id BIGINT NOT NULL, week_start DATE NOT NULL,
+  swim_km DECIMAL, bike_km DECIMAL, run_km DECIMAL, notes TEXT,
+  UNIQUE(athlete_id, week_start)
+);
+ALTER TABLE weekly_goals DISABLE ROW LEVEL SECURITY;`;
+
+async function initSupabase() {
+  try {
+    if (!window.supabase) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    _sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+    // Try to load profile — detects if tables exist
+    if (athlete) {
+      const ok = await sbLoadProfile();
+      if (ok === 'setup') {
+        _sbReady = false;
+        showSbSetupBanner();
+        return;
+      }
+      _sbReady = true;
+      updateSbStatus('synced');
+    }
+  } catch(e) {
+    console.warn('Supabase init failed, using localStorage only', e);
+    _sbReady = false;
+    updateSbStatus('offline');
+  }
+}
+
+async function sbLoadProfile() {
+  if (!_sb || !athlete) return null;
+  try {
+    const { data, error } = await _sb
+      .from('athlete_profile')
+      .select('*')
+      .eq('athlete_id', athlete.id)
+      .maybeSingle();
+
+    if (error) {
+      // code 42P01 = table doesn't exist, PGRST116 = no rows
+      if (error.code === '42P01' || error.message?.includes('does not exist')) return 'setup';
+      console.warn('SB load error', error);
+      return null;
+    }
+
+    if (!data) {
+      // No row yet — migrate localStorage to Supabase if there's anything to migrate
+      const mv = getMetrics();
+      if (Object.values(mv).some(v => v > 0)) {
+        await sbSaveProfile();
+      }
+      return 'ok';
+    }
+
+    // Populate localStorage from Supabase (cross-device sync)
+    const map = [
+      ['weight','m_weight'], ['height','m_height'], ['ftp','m_ftp'],
+      ['hr_max','m_hrMax'], ['hr_rest','m_hrRest'], ['vma','m_vma'],
+      ['swim_pace','m_swimPace'], ['bike_pace','m_bikePace'],
+      ['run_pace_703','m_runPace703'], ['run_pace_semi','m_runPaceSemi'],
+      ['hr_max','hrMax'], ['theme','theme']
+    ];
+    map.forEach(([sb, ls]) => {
+      if (data[sb] !== null && data[sb] !== undefined) localStorage.setItem(ls, data[sb]);
+    });
+
+    // Refresh zones display if profil tab is open
+    renderMetricZones();
+    return 'ok';
+  } catch(e) {
+    console.warn('sbLoadProfile error', e);
+    return null;
+  }
+}
+
+async function sbSaveProfile() {
+  if (!_sb || !athlete || _sbSyncing) return false;
+  _sbSyncing = true;
+  updateSbStatus('syncing');
+  const mv = getMetrics();
+  try {
+    const { error } = await _sb.from('athlete_profile').upsert({
+      athlete_id: athlete.id,
+      strava_name: `${athlete.firstname || ''} ${athlete.lastname || ''}`.trim(),
+      weight: mv.weight || null, height: mv.height || null,
+      ftp: mv.ftp || null, hr_max: mv.hrMax || null,
+      hr_rest: mv.hrRest || null, vma: mv.vma || null,
+      swim_pace: mv.swimPace || null, bike_pace: mv.bikePace || null,
+      run_pace_703: mv.runPace703 || null, run_pace_semi: mv.runPaceSemi || null,
+      theme: localStorage.getItem('theme') || 'auto',
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'athlete_id' });
+    if (error) throw error;
+    updateSbStatus('synced');
+    return true;
+  } catch(e) {
+    console.warn('sbSaveProfile error', e);
+    updateSbStatus('error');
+    return false;
+  } finally {
+    _sbSyncing = false;
+  }
+}
+
+async function sbMarkWorkoutDone(dayIdx, title, type) {
+  // Save to localStorage as fallback
+  const today = new Date().toISOString().split('T')[0];
+  localStorage.setItem(`done_${today}_${dayIdx}`, '1');
+
+  if (!_sb || !athlete) return;
+  try {
+    await _sb.from('workout_completions').insert({
+      athlete_id: athlete.id,
+      date: today,
+      workout_title: title,
+      workout_type: type
+    });
+  } catch(e) { console.warn('sbMarkWorkoutDone error', e); }
+}
+
+async function sbLoadWeekDone() {
+  const today = new Date().toISOString().split('T')[0];
+  const monday = getWeekMonday();
+  const weekStart = monday.toISOString().split('T')[0];
+
+  if (!_sb || !athlete) {
+    // Fallback: read localStorage
+    const done = {};
+    for (let i = 0; i < 7; i++) done[i] = localStorage.getItem(`done_${getDateOffset(monday, i).toISOString().split('T')[0]}_${i}`) === '1';
+    return done;
+  }
+  try {
+    const { data } = await _sb.from('workout_completions')
+      .select('date, workout_type')
+      .eq('athlete_id', athlete.id)
+      .gte('date', weekStart)
+      .lt('date', getDateOffset(monday, 7).toISOString().split('T')[0]);
+    const done = {};
+    (data || []).forEach((r, i) => {
+      const d = new Date(r.date); const idx = (d.getDay() + 6) % 7;
+      done[idx] = true;
+    });
+    return done;
+  } catch(e) { return {}; }
+}
+
+async function sbSaveWeeklyGoals(goals) {
+  const monday = getWeekMonday();
+  const weekStart = monday.toISOString().split('T')[0];
+  localStorage.setItem(`wg_${weekStart}`, JSON.stringify(goals));
+  if (!_sb || !athlete) return;
+  try {
+    await _sb.from('weekly_goals').upsert({
+      athlete_id: athlete.id, week_start: weekStart,
+      swim_km: goals.swim || null, bike_km: goals.bike || null,
+      run_km: goals.run || null, notes: goals.notes || null
+    }, { onConflict: 'athlete_id,week_start' });
+  } catch(e) { console.warn('sbSaveWeeklyGoals error', e); }
+}
+
+async function sbLoadWeeklyGoals() {
+  const monday = getWeekMonday();
+  const weekStart = monday.toISOString().split('T')[0];
+  if (!_sb || !athlete) {
+    const ls = localStorage.getItem(`wg_${weekStart}`);
+    return ls ? JSON.parse(ls) : null;
+  }
+  try {
+    const { data } = await _sb.from('weekly_goals')
+      .select('*').eq('athlete_id', athlete.id).eq('week_start', weekStart).maybeSingle();
+    return data || null;
+  } catch(e) { return null; }
+}
+
+function getWeekMonday() {
+  const d = new Date(); const day = d.getDay();
+  d.setDate(d.getDate() - ((day + 6) % 7)); d.setHours(0,0,0,0);
+  return d;
+}
+function getDateOffset(base, offset) {
+  const d = new Date(base); d.setDate(d.getDate() + offset); return d;
+}
+
+function updateSbStatus(status) {
+  const el = document.getElementById('sbStatus');
+  if (!el) return;
+  const map = {
+    synced:  { text:'☁️ Synchronisé', color:'var(--run)' },
+    syncing: { text:'↻ Sync...', color:'var(--muted)' },
+    error:   { text:'⚠️ Erreur sync', color:'var(--danger)' },
+    offline: { text:'📴 Hors ligne', color:'var(--muted)' },
+    setup:   { text:'⚙️ Config. requise', color:'var(--bike)' }
+  };
+  const s = map[status] || map.offline;
+  el.textContent = s.text;
+  el.style.color = s.color;
+}
+
+function showSbSetupBanner() {
+  localStorage.setItem('sb_needs_setup', '1');
+  updateSbStatus('setup');
+  // If profil tab is active, refresh it
+  const profTab = document.getElementById('tab-profil');
+  if (profTab && profTab.classList.contains('active')) renderProfil();
+}
+
+async function sbVerifySetup() {
+  const btn = document.getElementById('sbVerifyBtn');
+  if (btn) btn.textContent = 'Vérification…';
+  localStorage.removeItem('sb_needs_setup');
+  await initSupabase();
+  if (_sbReady) {
+    localStorage.removeItem('sb_needs_setup');
+    renderProfil();
+  } else {
+    if (btn) btn.textContent = 'Tables introuvables — réessaye';
+  }
+}
+
+async function markDayDone(idx, title, type) {
+  const today = new Date().toISOString().split('T')[0];
+  const key = `done_${today}_${idx}`;
+  const isDone = localStorage.getItem(key) === '1';
+  if (isDone) {
+    localStorage.removeItem(key);
+  } else {
+    localStorage.setItem(key, '1');
+    await sbMarkWorkoutDone(idx, title, type);
+  }
+  // Update button UI
+  const card = document.getElementById(`dayCard-${idx}`);
+  if (card) {
+    const btn = card.querySelector('button');
+    if (btn) {
+      const nowDone = !isDone;
+      btn.textContent = nowDone ? '✓ Fait' : 'Valider';
+      btn.style.background = nowDone ? 'var(--run)' : 'var(--surface2)';
+      btn.style.color = nowDone ? 'white' : 'var(--muted)';
+      btn.style.borderColor = nowDone ? 'transparent' : 'var(--border)';
+    }
+  }
+}
+
+async function renderWeeklyGoalsWidget() {
+  const el = document.getElementById('weeklyGoalsWidget');
+  if (!el) return;
+  const goals = await sbLoadWeeklyGoals();
+
+  const getType = a => a.sport_type || a.type || '';
+  const weekStart = getWeekMonday();
+  const weekActs = activities.filter(a => new Date(a.start_date) >= weekStart);
+  const swimKm = weekActs.filter(a=>getType(a)==='Swim').reduce((s,a)=>s+a.distance/1000,0);
+  const bikeKm = weekActs.filter(a=>['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a))).reduce((s,a)=>s+a.distance/1000,0);
+  const runKm  = weekActs.filter(a=>['Run','TrailRun'].includes(getType(a))).reduce((s,a)=>s+a.distance/1000,0);
+
+  if (!goals) {
+    el.innerHTML = `<div style="font-size:0.72rem;color:var(--muted);text-align:center;padding:0.5rem 0;">
+      <button onclick="showGoalsForm()" style="background:none;border:none;color:var(--accent);font-size:0.78rem;font-family:'DM Sans',sans-serif;cursor:pointer;text-decoration:underline;">+ Définir des objectifs de la semaine</button>
+    </div>`;
+    return;
+  }
+
+  const bar = (val, target, color) => {
+    if (!target) return '';
+    const pct = Math.min(100, Math.round(val / target * 100));
+    return `<div style="flex:1;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${color};border-radius:3px;"></div></div>`;
+  };
+
+  el.innerHTML = `<div style="background:var(--surface);border-radius:10px;padding:0.75rem;border:1px solid var(--border);margin-bottom:1rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-size:0.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Objectifs semaine</div>
+      <button onclick="showGoalsForm()" style="background:none;border:none;color:var(--muted);font-size:0.75rem;font-family:'DM Sans',sans-serif;cursor:pointer;">Modifier</button>
+    </div>
+    ${goals.swim_km ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:0.72rem;width:20px;">🏊</span>${bar(swimKm,goals.swim_km,'#00b4d8')}<span style="font-size:0.7rem;color:var(--muted);white-space:nowrap;">${swimKm.toFixed(1)}/${goals.swim_km}km</span></div>` : ''}
+    ${goals.bike_km ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:0.72rem;width:20px;">🚴</span>${bar(bikeKm,goals.bike_km,'#f77f00')}<span style="font-size:0.7rem;color:var(--muted);white-space:nowrap;">${bikeKm.toFixed(0)}/${goals.bike_km}km</span></div>` : ''}
+    ${goals.run_km  ? `<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:0.72rem;width:20px;">🏃</span>${bar(runKm,goals.run_km,'#06d6a0')}<span style="font-size:0.7rem;color:var(--muted);white-space:nowrap;">${runKm.toFixed(1)}/${goals.run_km}km</span></div>` : ''}
+  </div>`;
+}
+
+function showGoalsForm() {
+  const el = document.getElementById('weeklyGoalsWidget');
+  if (!el) return;
+  el.innerHTML = `<div style="background:var(--surface);border-radius:10px;padding:0.75rem;border:1px solid var(--border);margin-bottom:1rem;">
+    <div style="font-size:0.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Objectifs de la semaine</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div><div style="font-size:0.68rem;color:var(--swim);margin-bottom:3px;">🏊 Nat. (km)</div><input id="g_swim" type="number" min="0" step="0.5" class="metric-input" style="width:100%;"></div>
+      <div><div style="font-size:0.68rem;color:var(--bike);margin-bottom:3px;">🚴 Vélo (km)</div><input id="g_bike" type="number" min="0" step="5" class="metric-input" style="width:100%;"></div>
+      <div><div style="font-size:0.68rem;color:var(--run);margin-bottom:3px;">🏃 Cap. (km)</div><input id="g_run" type="number" min="0" step="1" class="metric-input" style="width:100%;"></div>
+    </div>
+    <button onclick="saveGoals()" style="width:100%;background:var(--accent);color:white;border:none;border-radius:6px;padding:0.5rem;font-size:0.8rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;">Enregistrer</button>
+  </div>`;
+}
+
+async function saveGoals() {
+  const swim = parseFloat(document.getElementById('g_swim')?.value) || null;
+  const bike = parseFloat(document.getElementById('g_bike')?.value) || null;
+  const run  = parseFloat(document.getElementById('g_run')?.value)  || null;
+  await sbSaveWeeklyGoals({ swim, bike, run });
+  renderWeeklyGoalsWidget();
 }
 
 function disconnect() {
