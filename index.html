@@ -2882,88 +2882,111 @@ async function renderFormeGarmin() {
 
   if (!_sb || !_sbReady) { el.innerHTML = ''; return; }
 
-  const athleteId = athlete?.id;
+  // Read athlete_id from strava_token in localStorage
+  let athleteId = athlete?.id;
+  if (!athleteId) {
+    try {
+      const t = localStorage.getItem('strava_token');
+      if (t) athleteId = JSON.parse(t)?.athlete?.id;
+    } catch {}
+  }
   if (!athleteId) { el.innerHTML = ''; return; }
 
-  // Fetch last 8 days of Garmin data
-  const today = new Date();
-  const d8ago = new Date(today); d8ago.setDate(today.getDate() - 8);
-  const dateStr = d8ago.toISOString().split('T')[0];
-
+  // Fetch last 8 days
+  const d8ago = new Date(); d8ago.setDate(d8ago.getDate() - 8);
   let rows = [];
   try {
-    const { data } = await _sb.table('garmin_daily')
+    const { data } = await _sb.from('garmin_daily')
       .select('date,body_battery,hrv,sleep_score,sleep_duration,stress,spo2')
       .eq('athlete_id', athleteId)
-      .gte('date', dateStr)
+      .gte('date', d8ago.toISOString().split('T')[0])
       .order('date', { ascending: false });
     rows = data || [];
   } catch(e) { el.innerHTML = ''; return; }
 
   if (!rows.length) { el.innerHTML = ''; return; }
 
-  const latest = rows[0];
+  const r = rows[0];
 
-  // Body Battery
-  const bb = latest.body_battery;
+  // ── Body Battery ─────────────────────────────────────────────────────────
+  const bb    = r.body_battery;
   const bbCol = bb === null ? 'var(--muted)' : bb < 30 ? '#ff4d6d' : bb < 60 ? '#f77f00' : '#06d6a0';
   const bbPct = bb !== null ? Math.min(100, Math.max(0, bb)) : 0;
 
-  // HRV trend vs 7-day avg
-  const hrv = latest.hrv;
-  const hrvVals = rows.slice(1, 8).map(r => r.hrv).filter(v => v !== null);
-  const hrv7avg = hrvVals.length ? Math.round(hrvVals.reduce((s,v) => s+v, 0) / hrvVals.length) : null;
+  // ── HRV + 7-day trend ────────────────────────────────────────────────────
+  const hrv = r.hrv;
+  const hrvVals = rows.slice(1, 8).map(x => x.hrv).filter(v => v !== null);
+  const hrv7avg = hrvVals.length ? Math.round(hrvVals.reduce((s,v) => s+v,0) / hrvVals.length) : null;
   let hrvTrend = '';
   if (hrv !== null && hrv7avg !== null) {
-    if (hrv > hrv7avg + 3)       hrvTrend = '<span style="color:#06d6a0;font-size:0.85rem;">↑</span>';
-    else if (hrv < hrv7avg - 3)  hrvTrend = '<span style="color:#ff4d6d;font-size:0.85rem;">↓</span>';
-    else                          hrvTrend = '<span style="color:#f77f00;font-size:0.85rem;">→</span>';
+    if      (hrv > hrv7avg + 3) hrvTrend = '<span style="color:#06d6a0;">↑</span>';
+    else if (hrv < hrv7avg - 3) hrvTrend = '<span style="color:#ff4d6d;">↓</span>';
+    else                         hrvTrend = '<span style="color:#f77f00;">→</span>';
   }
+  const hrvSub = hrv7avg !== null ? `moy. 7j : ${hrv7avg}` : 'ms';
 
-  // Sleep
-  const sleepDur  = latest.sleep_duration;
-  const sleepScore = latest.sleep_score;
-  const sleepDurFmt = sleepDur ? `${Math.floor(sleepDur)}h${Math.round((sleepDur % 1) * 60).toString().padStart(2,'0')}` : '—';
-  const sleepCol = sleepScore === null ? 'var(--muted)' : sleepScore < 50 ? '#ff4d6d' : sleepScore < 70 ? '#f77f00' : '#06d6a0';
+  // ── Sleep ─────────────────────────────────────────────────────────────────
+  const sleepDur   = r.sleep_duration;
+  const sleepScore = r.sleep_score;
+  const sleepFmt   = sleepDur !== null ? `${Math.floor(sleepDur)}h${Math.round((sleepDur % 1) * 60).toString().padStart(2,'0')}` : '—';
+  const sleepCol   = sleepScore === null ? 'var(--muted)' : sleepScore < 50 ? '#ff4d6d' : sleepScore < 70 ? '#f77f00' : '#06d6a0';
+  const sleepSub   = sleepScore !== null ? `score ${sleepScore}` : '';
 
-  // Recommendation
+  // ── Stress ────────────────────────────────────────────────────────────────
+  const stress    = r.stress;
+  const stressCol = stress === null ? 'var(--muted)' : stress < 26 ? '#06d6a0' : stress < 51 ? '#f77f00' : '#ff4d6d';
+  const stressSub = stress !== null ? (stress < 26 ? 'repos' : stress < 51 ? 'modéré' : 'élevé') : '';
+
+  // ── SpO2 ──────────────────────────────────────────────────────────────────
+  const spo2    = r.spo2;
+  const spo2Col = spo2 === null ? 'var(--muted)' : spo2 >= 95 ? '#06d6a0' : spo2 >= 90 ? '#f77f00' : '#ff4d6d';
+
+  // ── Recommendation ────────────────────────────────────────────────────────
   let recIcon, recText, recCol;
   if (bb !== null && bb < 30) {
     recIcon = '🛑'; recText = 'Repos recommandé'; recCol = '#ff4d6d';
-  } else if ((hrv !== null && hrv7avg !== null && hrv < hrv7avg - 5) || (sleepScore !== null && sleepScore < 50)) {
+  } else if ((hrv !== null && hrv7avg !== null && hrv < hrv7avg - 5) || (sleepScore !== null && sleepScore < 50) || (stress !== null && stress > 60)) {
     recIcon = '🟡'; recText = 'Séance légère conseillée'; recCol = '#f77f00';
   } else {
     recIcon = '✅'; recText = 'Séance intense OK'; recCol = '#06d6a0';
   }
 
+  // ── helper: mini metric tile ─────────────────────────────────────────────
+  const tile = (label, val, col, sub, extra = '') => `
+    <div style="background:var(--surface);border-radius:10px;padding:0.6rem 0.4rem;text-align:center;">
+      <div style="font-size:0.63rem;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">${label}</div>
+      <div style="font-size:1.2rem;font-weight:700;color:${col};line-height:1.1;">${val !== null && val !== undefined ? val : '—'}${extra}</div>
+      <div style="font-size:0.6rem;color:${col};margin-top:3px;min-height:0.8rem;">${sub}</div>
+    </div>`;
+
   el.innerHTML = `
   <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:1rem;margin-bottom:1rem;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.7rem;">
       <div style="font-size:0.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">⌚ Forme Garmin</div>
-      <div style="font-size:0.68rem;color:var(--muted);">${latest.date}</div>
+      <div style="font-size:0.68rem;color:var(--muted);">${r.date}</div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.6rem;margin-bottom:0.75rem;">
-      <!-- Body Battery -->
-      <div style="background:var(--surface);border-radius:10px;padding:0.65rem 0.5rem;text-align:center;">
-        <div style="font-size:0.68rem;color:var(--muted);margin-bottom:5px;">Battery</div>
-        <div style="font-size:1.3rem;font-weight:700;color:${bbCol};">${bb !== null ? bb : '—'}</div>
-        <div style="height:4px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden;">
-          <div style="height:100%;width:${bbPct}%;background:${bbCol};border-radius:2px;transition:width 0.6s;"></div>
+
+    <!-- Row 1: Battery (wide) + HRV + Sleep score -->
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+      <!-- Body Battery with gauge -->
+      <div style="background:var(--surface);border-radius:10px;padding:0.6rem 0.6rem;text-align:center;">
+        <div style="font-size:0.63rem;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Body Battery</div>
+        <div style="font-size:1.5rem;font-weight:700;color:${bbCol};line-height:1.1;">${bb !== null ? bb : '—'}</div>
+        <div style="height:5px;background:var(--border);border-radius:3px;margin-top:6px;overflow:hidden;">
+          <div style="height:100%;width:${bbPct}%;background:${bbCol};border-radius:3px;transition:width 0.7s;"></div>
         </div>
       </div>
-      <!-- HRV -->
-      <div style="background:var(--surface);border-radius:10px;padding:0.65rem 0.5rem;text-align:center;">
-        <div style="font-size:0.68rem;color:var(--muted);margin-bottom:5px;">HRV</div>
-        <div style="font-size:1.3rem;font-weight:700;color:var(--accent);">${hrv !== null ? hrv : '—'}${hrvTrend}</div>
-        <div style="font-size:0.62rem;color:var(--muted);margin-top:4px;">${hrv7avg !== null ? `moy. 7j : ${hrv7avg}` : 'ms'}</div>
-      </div>
-      <!-- Sleep -->
-      <div style="background:var(--surface);border-radius:10px;padding:0.65rem 0.5rem;text-align:center;">
-        <div style="font-size:0.68rem;color:var(--muted);margin-bottom:5px;">Sommeil</div>
-        <div style="font-size:1.3rem;font-weight:700;color:${sleepCol};">${sleepDurFmt}</div>
-        <div style="font-size:0.62rem;color:${sleepCol};margin-top:4px;">${sleepScore !== null ? `score ${sleepScore}` : ''}</div>
-      </div>
+      ${tile('HRV', hrv, 'var(--accent)', hrvSub, hrvTrend)}
+      ${tile('Sommeil', sleepFmt, sleepCol, sleepSub)}
     </div>
+
+    <!-- Row 2: Sleep score + Stress + SpO2 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.7rem;">
+      ${tile('Score sommeil', sleepScore, sleepCol, sleepFmt)}
+      ${tile('Stress', stress, stressCol, stressSub)}
+      ${tile('SpO2', spo2 !== null ? spo2 + '%' : null, spo2Col, '')}
+    </div>
+
     <!-- Recommendation -->
     <div style="background:${recCol}15;border:1px solid ${recCol}30;border-radius:8px;padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">
       <span style="font-size:1rem;">${recIcon}</span>
@@ -3193,12 +3216,16 @@ async function computeAdaptation(debriefs) {
   // ── Fetch latest Garmin data ──────────────────────────────────────────────
   let garmin = null;
   let garmin7 = [];
-  if (_sb && _sbReady && athlete?.id) {
+  let _garminAthleteId = athlete?.id;
+  if (!_garminAthleteId) {
+    try { const t = localStorage.getItem('strava_token'); if (t) _garminAthleteId = JSON.parse(t)?.athlete?.id; } catch {}
+  }
+  if (_sb && _sbReady && _garminAthleteId) {
     try {
       const d8ago = new Date(); d8ago.setDate(d8ago.getDate() - 8);
-      const { data } = await _sb.table('garmin_daily')
+      const { data } = await _sb.from('garmin_daily')
         .select('date,body_battery,hrv,sleep_score,sleep_duration,stress')
-        .eq('athlete_id', athlete.id)
+        .eq('athlete_id', _garminAthleteId)
         .gte('date', d8ago.toISOString().split('T')[0])
         .order('date', { ascending: false });
       if (data && data.length) { garmin = data[0]; garmin7 = data; }
