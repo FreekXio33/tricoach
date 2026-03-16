@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>TriCoach Widget</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #111318;
+    --surface2: #1a1d24;
+    --border: rgba(255,255,255,0.08);
+    --swim: #00b4d8;
+    --bike: #f77f00;
+    --run: #06d6a0;
+    --accent: #c77dff;
+    --text: #f0f0f0;
+    --muted: #888;
+    --danger: #ff4d6d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .widget {
+    width: 100%;
+    max-width: 338px;
+  }
+  .widget-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+  }
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.4rem;
+    letter-spacing: 2px;
+    color: var(--accent);
+  }
+  .logo span { color: var(--run); }
+  .athlete-name {
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .card {
+    background: var(--surface);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    padding: 1rem;
+    margin-bottom: 0.65rem;
+  }
+  .card-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+  .workout-title {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 0.3rem;
+  }
+  .workout-meta {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .workout-stripe {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+
+  .countdowns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+  .countdown-card {
+    background: var(--surface2);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    padding: 0.75rem;
+    text-align: center;
+  }
+  .countdown-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+  .countdown-days {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2rem;
+    line-height: 1;
+    animation: countPulse 3s ease-in-out infinite;
+  }
+  .countdown-sub {
+    font-size: 0.6rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  @keyframes countPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.07); }
+  }
+
+  .connect-prompt {
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+  .connect-logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2.5rem;
+    letter-spacing: 3px;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+  .connect-logo span { color: var(--run); }
+  .connect-msg {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 1.25rem;
+    line-height: 1.5;
+  }
+  .connect-link {
+    display: inline-block;
+    background: var(--accent);
+    color: white;
+    text-decoration: none;
+    border-radius: 10px;
+    padding: 0.65rem 1.4rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .refresh-note {
+    text-align: center;
+    font-size: 0.62rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+<div class="widget">
+  <div id="widgetContent"></div>
+</div>
+
+<script>
+const SEMI_DATE = new Date('2026-04-12');
+const RACE_703_DATE = new Date('2026-06-14');
+
+const planByPhase = {
+  base: [
+    { title: 'Natation — Technique', dur: '45min', type: 'swim' },
+    { title: 'Course — Endurance Z2', dur: '50min', type: 'run' },
+    { title: 'Vélo — Endurance Z2', dur: '1h15', type: 'bike' },
+    { title: 'Natation — Intervalles', dur: '45min', type: 'swim' },
+    { title: 'Repos', dur: '', type: 'rest' },
+    { title: 'Vélo — Longue sortie', dur: '2h30', type: 'bike' },
+    { title: 'Course — Endurance Z2', dur: '55min', type: 'run' },
+  ],
+  build: [
+    { title: 'Natation — Technique', dur: '45min', type: 'swim' },
+    { title: 'Course — Allure course', dur: '55min', type: 'run' },
+    { title: 'Vélo — Seuil', dur: '1h30', type: 'bike' },
+    { title: 'Natation — Intervalles', dur: '50min', type: 'swim' },
+    { title: 'Course — Endurance Z2', dur: '50min', type: 'run' },
+    { title: 'Enchaînement Vélo→Course', dur: '1h45', type: 'brick' },
+    { title: 'Course — Longue sortie', dur: '1h30', type: 'run' },
+  ],
+  peak: [
+    { title: 'Natation — Intervalles', dur: '50min', type: 'swim' },
+    { title: 'Course — Allure course', dur: '55min', type: 'run' },
+    { title: 'Vélo — Longue sortie', dur: '3h', type: 'bike' },
+    { title: 'Natation — Technique', dur: '45min', type: 'swim' },
+    { title: 'Récupération active', dur: '30min', type: 'rest' },
+    { title: 'Enchaînement Vélo→Course', dur: '2h', type: 'brick' },
+    { title: 'Course — Longue sortie', dur: '1h45', type: 'run' },
+  ],
+};
+
+const typeColor = {
+  swim: '#00b4d8',
+  bike: '#f77f00',
+  run: '#06d6a0',
+  brick: '#f77f00',
+  rest: '#888',
+};
+
+const typeIcon = {
+  swim: '🏊',
+  bike: '🚴',
+  run: '🏃',
+  brick: '🚴🏃',
+  rest: '😴',
+};
+
+function daysSince(date) {
+  return Math.ceil((date - new Date()) / 86400000);
+}
+
+function getPhase(totalMinPerWeek) {
+  if (totalMinPerWeek < 300) return 'base';
+  if (totalMinPerWeek < 480) return 'build';
+  return 'peak';
+}
+
+function renderWidget() {
+  const container = document.getElementById('widgetContent');
+  const stored = localStorage.getItem('strava_token');
+
+  if (!stored) {
+    container.innerHTML = `
+      <div class="connect-prompt">
+        <div class="connect-logo">Tri<span>Coach</span></div>
+        <div class="connect-msg">Connecte-toi sur TriCoach pour voir ta séance du jour et tes compteurs de course.</div>
+        <a class="connect-link" href="/index.html">Ouvrir TriCoach</a>
+      </div>`;
+    return;
+  }
+
+  let token;
+  try { token = JSON.parse(stored); } catch(e) {
+    container.innerHTML = `<div class="connect-prompt"><div class="connect-msg">Erreur de token. <a href="/index.html" style="color:var(--accent);">Reconnecte-toi.</a></div></div>`;
+    return;
+  }
+
+  const athlete = token.athlete || {};
+  const firstname = athlete.firstname || 'Athlète';
+
+  // Determine today's plan entry
+  const now = new Date();
+  const dayIdx = (now.getDay() + 6) % 7; // Mon=0 … Sun=6
+
+  // Rough phase estimate from token expiry age (no live activities in widget)
+  // Default to 'build' as a reasonable guess
+  const phase = 'build';
+  const plan = planByPhase[phase];
+  const todayWorkout = plan[dayIdx];
+
+  const semiDays = daysSince(SEMI_DATE);
+  const days703 = daysSince(RACE_703_DATE);
+
+  const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+  const todayLabel = dayNames[dayIdx];
+  const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  container.innerHTML = `
+    <div class="widget-header">
+      <div class="logo">Tri<span>Coach</span></div>
+      <div class="athlete-name">Bonjour ${firstname} 👋</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">${dateStr}</div>
+      <div class="workout-title">
+        <span class="workout-stripe" style="background:${typeColor[todayWorkout.type]||'#888'};"></span>
+        ${typeIcon[todayWorkout.type]||'⚡'} ${todayWorkout.title}
+      </div>
+      ${todayWorkout.dur
+        ? `<div class="workout-meta">Durée : <strong style="color:${typeColor[todayWorkout.type]||'var(--accent)'};">${todayWorkout.dur}</strong></div>`
+        : `<div class="workout-meta" style="color:var(--muted);">Repos — Récupère bien !</div>`
+      }
+    </div>
+
+    <div class="countdowns">
+      <div class="countdown-card">
+        <div class="countdown-label">Semi-marathon</div>
+        <div class="countdown-days" style="color:var(--run);">${semiDays}</div>
+        <div class="countdown-sub">jours · 12 avr.</div>
+      </div>
+      <div class="countdown-card">
+        <div class="countdown-label">Triathlon 70.3</div>
+        <div class="countdown-days" style="color:var(--accent);">${days703}</div>
+        <div class="countdown-sub">jours · 14 juin</div>
+      </div>
+    </div>
+
+    <div class="refresh-note">Mise à jour automatique toutes les 30 min</div>
+  `;
+}
+
+renderWidget();
+
+// Auto-refresh every 30 minutes
+setTimeout(() => location.reload(), 30 * 60 * 1000);
+</script>
+</body>
+</html>

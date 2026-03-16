@@ -175,6 +175,50 @@
     .stats-grid { grid-template-columns: 1fr 1fr; }
     .stat-card.run { grid-column: span 2; }
   }
+
+  /* LIGHT MODE */
+  body.light {
+    --bg: #f0f4f8;
+    --surface: #fff;
+    --surface2: #e8edf4;
+    --border: rgba(0,0,0,0.1);
+    --text: #1a1c2e;
+    --muted: #6b7a90;
+  }
+
+  /* STREAK PILL */
+  .streak-pill {
+    background: rgba(247,127,0,0.15);
+    color: #f77f00;
+    border: 1px solid rgba(247,127,0,0.25);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* HR ZONE BARS */
+  .zone-bar-wrap { margin-bottom: 6px; }
+  .zone-bar-label { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); margin-bottom: 2px; }
+  .zone-bar-track { height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .zone-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+
+  /* COUNTDOWN ANIMATION */
+  @keyframes countPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.07); }
+  }
+  .goal-days { animation: countPulse 3s ease-in-out infinite; }
+
+  /* WEEK DELTA */
+  .delta { font-size: 0.65rem; font-weight: 600; margin-top: 2px; }
+  .delta.up { color: #06d6a0; }
+  .delta.down { color: #ff4d6d; }
+  .delta.flat { color: var(--muted); }
+
+  /* MAP */
+  #mapContainer { position: relative; }
 </style>
 </head>
 <body>
@@ -213,6 +257,7 @@
     <button class="tab" onclick="switchTab('programme',this)">📅 Programme</button>
     <button class="tab" onclick="switchTab('coach',this)">💡 Conseils</button>
     <button class="tab" onclick="switchTab('progression',this)">📈 Progression</button>
+    <button class="tab" onclick="switchTab('carte',this)">🗺️ Carte</button>
     <button class="tab" onclick="switchTab('profil',this)">👤 Profil</button>
   </div>
 
@@ -250,7 +295,7 @@
       </div>
       <div id="formeDuJour" style="margin-bottom:1.5rem;"></div>
 
-      <div class="section-header"><div class="section-title">Charge cette semaine</div></div>
+      <div class="section-header"><div class="section-title">Charge cette semaine</div><div id="streakBadge"></div></div>
       <div class="stats-grid" id="statsGrid"></div>
 
       <div class="section-header" style="margin-top:0.5rem;">
@@ -302,6 +347,13 @@
     <div id="progLoading" class="spinner" style="display:none;"></div>
     <div id="progCharts">
       <div style="margin-bottom:1.5rem;">
+        <div class="section-title" style="margin-bottom:0.6rem;color:var(--accent);">📊 Courbe de forme CTL/ATL/TSB</div>
+        <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem;">
+          <canvas id="chartFitness" height="130"></canvas>
+        </div>
+        <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;line-height:1.5;">CTL = forme chronique (42j) · ATL = fatigue aiguë (7j) · TSB = fraîcheur (CTL−ATL)</div>
+      </div>
+      <div style="margin-bottom:1.5rem;">
         <div class="section-title" style="margin-bottom:0.6rem;color:var(--swim);">🏊 Natation</div>
         <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:0.75rem;">
           <canvas id="chartSwim" height="140"></canvas>
@@ -320,6 +372,13 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- CARTE GPS -->
+  <div id="tab-carte" class="page">
+    <div style="margin-bottom:1rem;"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Carte GPS</div><div style="font-size:0.78rem;color:var(--muted);">Dernières sorties</div></div>
+    <div id="mapContainer" style="height:340px;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:center;"><div style="color:var(--muted);font-size:0.85rem;">Chargement de la carte...</div></div>
+    <div id="mapActivityList" style="margin-top:1rem;"></div>
   </div>
 
   <!-- PROFIL -->
@@ -399,6 +458,7 @@ async function refreshToken(refresh_token) {
 async function loadApp(token) {
   document.getElementById('connectScreen').style.display = 'none';
   document.getElementById('mainApp').style.display = 'block';
+  initTheme();
 
   athlete = token.athlete;
   document.getElementById('headerAvatar').src = athlete.profile_medium || athlete.profile;
@@ -442,34 +502,56 @@ function renderDashboard() {
   // Week stats
   const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
   weekStart.setHours(0,0,0,0);
+  const prevWeekStart = new Date(weekStart); prevWeekStart.setDate(weekStart.getDate() - 7);
+  const prevWeekEnd = new Date(weekStart); prevWeekEnd.setMilliseconds(-1);
 
   const weekActs = activities.filter(a => new Date(a.start_date) >= weekStart);
+  const prevWeekActs = activities.filter(a => { const d = new Date(a.start_date); return d >= prevWeekStart && d <= prevWeekEnd; });
   const getType = a => a.sport_type || a.type || '';
   const swim = weekActs.filter(a => getType(a) === 'Swim');
   const bike = weekActs.filter(a => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a)));
   const run = weekActs.filter(a => ['Run','TrailRun'].includes(getType(a)));
+  const prevSwim = prevWeekActs.filter(a => getType(a) === 'Swim');
+  const prevBike = prevWeekActs.filter(a => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(getType(a)));
+  const prevRun = prevWeekActs.filter(a => ['Run','TrailRun'].includes(getType(a)));
 
   const sumDist = arr => arr.reduce((s,a) => s + a.distance, 0);
+  const deltaHtml = (cur, prev) => {
+    if (prev === 0) return '';
+    const pct = Math.round((cur / prev - 1) * 100);
+    if (pct > 5) return `<div class="delta up">+${pct}%</div>`;
+    if (pct < -5) return `<div class="delta down">${pct}%</div>`;
+    return `<div class="delta flat">→</div>`;
+  };
 
   document.getElementById('statsGrid').innerHTML = `
     <div class="stat-card swim">
       <div class="stat-label">Natation</div>
       <div class="stat-value swim-c">${(sumDist(swim)/1000).toFixed(1)}<span style="font-size:0.9rem">km</span></div>
       <div class="stat-sub">${swim.length} séance${swim.length>1?'s':''}</div>
+      ${deltaHtml(swim.length, prevSwim.length)}
     </div>
     <div class="stat-card bike">
       <div class="stat-label">Vélo</div>
       <div class="stat-value bike-c">${Math.round(sumDist(bike)/1000)}<span style="font-size:0.9rem">km</span></div>
       <div class="stat-sub">${bike.length} séance${bike.length>1?'s':''}</div>
+      ${deltaHtml(bike.length, prevBike.length)}
     </div>
     <div class="stat-card run">
       <div class="stat-label">Course</div>
       <div class="stat-value run-c">${(sumDist(run)/1000).toFixed(1)}<span style="font-size:0.9rem">km</span></div>
       <div class="stat-sub">${run.length} séance${run.length>1?'s':''}</div>
+      ${deltaHtml(run.length, prevRun.length)}
     </div>`;
 
   // Forme du jour
   renderFormeDuJour();
+
+  // Streak
+  const streak = calcStreak();
+  document.getElementById('streakBadge').innerHTML = streak >= 2
+    ? `<div class="streak-pill">🔥 ${streak} jours de suite</div>`
+    : `<div style="font-size:0.72rem;color:var(--muted);">▶ Démarre une série !</div>`;
 
   // Load chart
   renderLoadChart();
@@ -829,6 +911,83 @@ function renderCoachAdvice() {
   const a = analyzeAthleteData();
   const cards = [];
 
+  // NEW 1 — Race time predictions
+  if (a.avgSwimSpeed > 0 || a.avgBikeSpeed > 0 || a.avgRunSpeed > 0) {
+    const swimTime703 = a.avgSwimSpeed > 0 ? 1900 / a.avgSwimSpeed : 0;
+    const bikeTime703 = a.avgBikeSpeed > 0 ? 90000 / a.avgBikeSpeed : 0;
+    const runTime703 = a.avgRunSpeed > 0 ? 21100 / a.avgRunSpeed : 0;
+    const total703 = swimTime703 + bikeTime703 + runTime703 + 300;
+    const runTimeSemi = a.avgRunSpeed > 0 ? 21100 / a.avgRunSpeed : 0;
+    const predLines = [];
+    if (total703 > 0 && a.avgSwimSpeed > 0 && a.avgBikeSpeed > 0 && a.avgRunSpeed > 0) {
+      predLines.push(`🏆 <strong>70.3 prédit :</strong> ${fmtSecs(total703)} <span style="color:var(--muted);font-size:0.78rem;">(Nat. ${fmtSecs(swimTime703)} + Vélo ${fmtSecs(bikeTime703)} + Cap. ${fmtSecs(runTime703)} + trans.)</span>`);
+    }
+    if (runTimeSemi > 0) {
+      predLines.push(`🏃 <strong>Semi-marathon prédit :</strong> ${fmtSecs(runTimeSemi)} <span style="color:var(--muted);font-size:0.78rem;">sur 21.1km à allure actuelle</span>`);
+    }
+    if (predLines.length) {
+      cards.push({ icon:'🔮', title:'Prédiction temps de course', accent:'var(--accent)',
+        body: predLines.join('<br>') + '<br><span style="font-size:0.72rem;color:var(--muted);">Basé sur tes allures moyennes Strava des 4 dernières semaines.</span>'
+      });
+    }
+  }
+
+  // NEW 2 — Overtraining alert
+  const hrMax = parseInt(localStorage.getItem('hrMax') || '185');
+  const now5d = new Date(Date.now() - 5 * 86400000);
+  const last5Acts = activities.filter(a2 => new Date(a2.start_date) >= now5d);
+  const intenseCount = last5Acts.filter(a2 => {
+    const hrPct = a2.average_heartrate ? a2.average_heartrate / hrMax : 0;
+    return (a2.moving_time > 2700 && hrPct > 0.78) || (a2.moving_time > 4500 && !a2.average_heartrate);
+  }).length;
+  const nowWeekStart = new Date(); nowWeekStart.setDate(nowWeekStart.getDate() - nowWeekStart.getDay()); nowWeekStart.setHours(0,0,0,0);
+  const prevWkStart2 = new Date(nowWeekStart); prevWkStart2.setDate(nowWeekStart.getDate() - 7);
+  const prevWkEnd2 = new Date(nowWeekStart); prevWkEnd2.setMilliseconds(-1);
+  const curWkLoad = activities.filter(a2 => new Date(a2.start_date) >= nowWeekStart).reduce((s,a2) => s + a2.moving_time, 0);
+  const prevWkLoad = activities.filter(a2 => { const d = new Date(a2.start_date); return d >= prevWkStart2 && d <= prevWkEnd2; }).reduce((s,a2) => s + a2.moving_time, 0);
+  const overloadRatio = prevWkLoad > 0 ? curWkLoad / prevWkLoad : 0;
+  if (intenseCount >= 3 || overloadRatio > 1.2) {
+    const reason = intenseCount >= 3
+      ? `<strong>${intenseCount} séances intenses</strong> en 5 jours`
+      : `Charge semaine actuelle <strong>+${Math.round((overloadRatio-1)*100)}%</strong> vs semaine précédente`;
+    cards.push({ icon:'⚠️', title:'Alerte surentraînement', accent:'var(--danger)',
+      body: `${reason} — risque de surcharge ! Prévois une journée de récupération complète et surveille ton sommeil et ta FC au repos. Réduis l'intensité des 2 prochaines séances.`,
+      danger: true
+    });
+  }
+
+  // NEW 3 — HR zones
+  const hrMax2 = parseInt(localStorage.getItem('hrMax') || '185');
+  const actsWithHR = activities.filter(a2 => a2.average_heartrate && a2.moving_time);
+  if (actsWithHR.length) {
+    const zones = [
+      { label:'Z1 — Récup.', min:0, max:0.60, color:'#00b4d8', time:0 },
+      { label:'Z2 — Aérobie', min:0.60, max:0.70, color:'#06d6a0', time:0 },
+      { label:'Z3 — Tempo', min:0.70, max:0.80, color:'#f77f00', time:0 },
+      { label:'Z4 — Seuil', min:0.80, max:0.90, color:'#ff4d6d', time:0 },
+      { label:'Z5 — Max', min:0.90, max:2, color:'#c77dff', time:0 },
+    ];
+    actsWithHR.forEach(a2 => {
+      const pct = a2.average_heartrate / hrMax2;
+      const z = zones.find(z2 => pct >= z2.min && pct < z2.max);
+      if (z) z.time += a2.moving_time / 60;
+    });
+    const totalZoneTime = zones.reduce((s,z) => s + z.time, 0);
+    if (totalZoneTime > 0) {
+      const barsHtml = zones.map(z => {
+        const pctWidth = Math.round(z.time / totalZoneTime * 100);
+        const timeLabel = z.time > 0 ? fmtDur(Math.round(z.time)) : '—';
+        return `<div class="zone-bar-wrap">
+          <div class="zone-bar-label"><span>${z.label}</span><span>${timeLabel} (${pctWidth}%)</span></div>
+          <div class="zone-bar-track"><div class="zone-bar-fill" style="width:${pctWidth}%;background:${z.color};"></div></div>
+        </div>`;
+      }).join('');
+      cards.push({ icon:'💓', title:`Zones FC (FCmax : ${hrMax2} bpm)`, accent:'var(--run)',
+        body: barsHtml + `<div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">Modifie ta FCmax dans Profil pour affiner le calcul.</div>`
+      });
+    }
+  }
+
   // 1. Tendance de volume
   const trendPct = a.totalAvgMin > 0 ? Math.round((a.thisWeekMin / a.totalAvgMin - 1) * 100) : 0;
   cards.push({ icon: trendPct > 10 ? '📈' : trendPct < -20 ? '📉' : '📊', title: 'Charge hebdomadaire', accent: trendPct > 25 ? 'var(--danger)' : 'var(--run)',
@@ -881,7 +1040,7 @@ function renderCoachAdvice() {
   });
 
   document.getElementById('coachAdvice').innerHTML = cards.map(c => `
-    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-bottom:10px;">
+    <div style="background:var(--surface);border-radius:12px;padding:1rem;border:1px solid ${c.danger ? 'rgba(255,77,109,0.35)' : 'var(--border)'};margin-bottom:10px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
         <span style="font-size:1.1rem;">${c.icon}</span>
         <span style="font-size:0.75rem;font-weight:600;color:${c.accent};text-transform:uppercase;letter-spacing:1px;">${c.title}</span>
@@ -926,12 +1085,26 @@ function renderProfil() {
       <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">RAPPELS D'ENTRAÎNEMENT</div>
       <div style="font-size:0.84rem;margin-bottom:0.75rem;line-height:1.5;">Reçois une notification chaque matin à 7h avec ta séance du jour.<br><span style="font-size:0.72rem;color:var(--muted);">Sur iPhone : ajoute l'app à l'écran d'accueil (Partager → Sur l'écran d'accueil) puis active.</span></div>
       <button id="notifBtn" onclick="setupNotifications()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:0.6rem 1.2rem;font-size:0.85rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">🔔 Activer les rappels</button>
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-top:1rem;">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem;">MODE D'AFFICHAGE</div>
+      <button id="themeToggleBtn" onclick="toggleTheme();renderProfil();" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0.6rem 1.2rem;font-size:0.85rem;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;">${themeLabel()}</button>
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:1rem;border:1px solid var(--border);margin-top:1rem;">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem;">FC MAXIMALE</div>
+      <div style="font-size:0.8rem;color:var(--text);margin-bottom:0.6rem;">Utilisée pour calculer tes zones d'entraînement Z1-Z5.</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="hrMaxInput" type="number" min="140" max="220" value="${localStorage.getItem('hrMax')||'185'}" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem;font-size:0.88rem;color:var(--text);font-family:'DM Sans',sans-serif;width:90px;outline:none;">
+        <span style="font-size:0.82rem;color:var(--muted);">bpm</span>
+        <button onclick="localStorage.setItem('hrMax',document.getElementById('hrMaxInput').value);this.textContent='✅ Sauvegardé';" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:0.5rem 0.9rem;font-size:0.82rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;">Enregistrer</button>
+      </div>
     </div>`;
 }
 
 // ===== PROGRESSION CHARTS =====
 let progCharts = {};
 function renderProgressionCharts() {
+  renderCTLChart();
   const getType = a => a.sport_type || a.type || '';
   const isSwim = t => t === 'Swim';
   const isBike = t => ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t);
@@ -1016,6 +1189,7 @@ function switchTab(name, el) {
   if (name === 'programme' && !document.getElementById('weekPlan').innerHTML) generatePlan();
   if (name === 'coach') renderCoachAdvice();
   if (name === 'progression') renderProgressionCharts();
+  if (name === 'carte') renderMapTab();
   if (name === 'profil') { renderProfil(); updateNotifBtn(); }
 }
 
@@ -1092,6 +1266,179 @@ function checkMorningNotification() {
     icon: '/icon-192.png',
     badge: '/icon-192.png'
   });
+}
+
+// ===== THEME =====
+function initTheme() {
+  const stored = localStorage.getItem('theme') || 'auto';
+  applyTheme(stored);
+}
+function applyTheme(mode) {
+  localStorage.setItem('theme', mode);
+  let dark;
+  if (mode === 'dark') dark = true;
+  else if (mode === 'light') dark = false;
+  else { const h = new Date().getHours(); dark = h >= 20 || h < 7; }
+  document.body.classList.toggle('light', !dark);
+}
+function toggleTheme() {
+  const cur = localStorage.getItem('theme') || 'auto';
+  const next = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto';
+  applyTheme(next);
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) btn.textContent = themeLabel();
+}
+function themeLabel() {
+  const m = localStorage.getItem('theme') || 'auto';
+  return m === 'auto' ? '🌓 Auto (heure)' : m === 'light' ? '☀️ Mode clair' : '🌙 Mode sombre';
+}
+
+// ===== STREAK =====
+function calcStreak() {
+  if (!activities.length) return 0;
+  const daySet = new Set(activities.map(a => {
+    const d = new Date(a.start_date_local || a.start_date);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  }));
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+  let i = daySet.has(todayKey) ? 0 : 1;
+  let streak = 0;
+  while (i <= 365) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (daySet.has(key)) { streak++; i++; } else break;
+  }
+  return streak;
+}
+
+// ===== FORMAT SECONDS =====
+function fmtSecs(s) {
+  if (!s || s <= 0) return '—';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.round(s % 60);
+  return h > 0 ? `${h}h${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+// ===== FITNESS CURVE CTL/ATL/TSB =====
+function computeFitnessCurve() {
+  const now = new Date(); now.setHours(23,59,59,999);
+  const days = 112;
+  const loadByDay = {};
+  activities.forEach(a => {
+    const d = new Date(a.start_date); d.setHours(0,0,0,0);
+    loadByDay[d.getTime()] = (loadByDay[d.getTime()] || 0) + a.moving_time / 60;
+  });
+  let atl = 0, ctl = 0;
+  const result = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now); d.setDate(now.getDate() - i); d.setHours(0,0,0,0);
+    const load = loadByDay[d.getTime()] || 0;
+    atl = atl + (1/7) * (load - atl);
+    ctl = ctl + (1/42) * (load - ctl);
+    result.push({
+      atl: +atl.toFixed(1), ctl: +ctl.toFixed(1), tsb: +(ctl - atl).toFixed(1),
+      label: (i % 14 === 0 || i === 0) ? `${d.getDate()}/${d.getMonth()+1}` : ''
+    });
+  }
+  return result;
+}
+
+function renderCTLChart() {
+  const curve = computeFitnessCurve();
+  if (progCharts.fitness) { progCharts.fitness.destroy(); }
+  progCharts.fitness = new Chart(document.getElementById('chartFitness'), {
+    data: {
+      labels: curve.map(p => p.label),
+      datasets: [
+        { type:'line', label:'CTL', data:curve.map(p=>p.ctl), borderColor:'#c77dff', borderWidth:2, pointRadius:0, tension:0.4, yAxisID:'y' },
+        { type:'line', label:'ATL', data:curve.map(p=>p.atl), borderColor:'#ff4d6d', borderWidth:2, pointRadius:0, tension:0.4, borderDash:[5,3], yAxisID:'y' },
+        { type:'line', label:'TSB', data:curve.map(p=>p.tsb), borderColor:'#06d6a0', borderWidth:1.5, pointRadius:0, tension:0.4, yAxisID:'y2' }
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ display:true, labels:{ color:'#888', font:{size:10}, boxWidth:10, padding:8 } }, tooltip:{ mode:'index', intersect:false } },
+      scales: {
+        x: { ticks:{ color:'#555', font:{size:9}, maxRotation:0, autoSkip:false, callback:(v,i,vals)=>curve[i]?.label||'' }, grid:{ color:'rgba(255,255,255,0.04)' } },
+        y: { position:'left', title:{ display:true, text:'min/j', color:'#555', font:{size:8} }, ticks:{ color:'#666', font:{size:9} }, grid:{ color:'rgba(255,255,255,0.05)' } },
+        y2: { position:'right', title:{ display:true, text:'TSB', color:'#555', font:{size:8} }, ticks:{ color:'#555', font:{size:9} }, grid:{ display:false } }
+      }
+    }
+  });
+}
+
+// ===== MAP =====
+let mapInstance = null;
+let mapLoaded = false;
+
+function decodePolyline(encoded) {
+  const result = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let shift = 0, b, val = 0;
+    do { b = encoded.charCodeAt(index++) - 63; val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (val & 1) ? ~(val >> 1) : (val >> 1);
+    shift = 0; val = 0;
+    do { b = encoded.charCodeAt(index++) - 63; val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (val & 1) ? ~(val >> 1) : (val >> 1);
+    result.push([lat / 1e5, lng / 1e5]);
+  }
+  return result;
+}
+
+async function renderMapTab() {
+  const getType = a => a.sport_type || a.type || '';
+  const sportColor = t => t === 'Swim' ? '#00b4d8' : ['Ride','VirtualRide','MountainBikeRide','GravelRide','EBikeRide'].includes(t) ? '#f77f00' : ['Run','TrailRun'].includes(t) ? '#06d6a0' : '#c77dff';
+
+  const actsWithMap = activities.filter(a => a.map && a.map.summary_polyline).slice(0, 5);
+
+  if (!mapLoaded) {
+    await new Promise(resolve => {
+      const link = document.createElement('link'); link.rel='stylesheet'; link.href='https://unpkg.com/leaflet@1.9/dist/leaflet.css'; document.head.appendChild(link);
+      const script = document.createElement('script'); script.src='https://unpkg.com/leaflet@1.9/dist/leaflet.js';
+      script.onload = resolve; document.head.appendChild(script);
+    });
+    mapLoaded = true;
+  }
+
+  const container = document.getElementById('mapContainer');
+  container.innerHTML = '';
+  container.style.display = 'block';
+
+  if (!actsWithMap.length) {
+    container.innerHTML = '<div style="height:340px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.85rem;">Aucune sortie GPS disponible</div>';
+    return;
+  }
+
+  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+
+  const mapDiv = document.createElement('div'); mapDiv.style.height='340px'; container.appendChild(mapDiv);
+  mapInstance = L.map(mapDiv, { zoomControl:true, scrollWheelZoom:false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OSM', maxZoom:18 }).addTo(mapInstance);
+
+  const allCoords = [];
+  actsWithMap.forEach(a => {
+    const coords = decodePolyline(a.map.summary_polyline);
+    if (!coords.length) return;
+    const color = sportColor(getType(a));
+    L.polyline(coords, { color, weight:3, opacity:0.85 }).addTo(mapInstance);
+    allCoords.push(...coords);
+  });
+  if (allCoords.length) mapInstance.fitBounds(allCoords, { padding:[12,12] });
+
+  const escapeHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const icons = { Swim:'🏊', Ride:'🚴', VirtualRide:'🚴', Run:'🏃', TrailRun:'🏃', MountainBikeRide:'🚴', GravelRide:'🚴', EBikeRide:'🚴' };
+  document.getElementById('mapActivityList').innerHTML = actsWithMap.map(a => {
+    const t = getType(a);
+    const color = sportColor(t);
+    const d = new Date(a.start_date_local||a.start_date);
+    const ds = isNaN(d)?'':d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    return `<div style="display:flex;align-items:center;gap:10px;padding:0.65rem 0.75rem;background:var(--surface);border-radius:8px;border:1px solid var(--border);margin-bottom:6px;">
+      <div style="width:6px;height:32px;border-radius:3px;background:${color};flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;"><div style="font-size:0.82rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${icons[t]||'⚡'} ${escapeHtml(a.name)}</div>
+      <div style="font-size:0.7rem;color:var(--muted);">${ds} · ${Math.round(a.moving_time/60)}min · ${(a.distance/1000).toFixed(1)}km</div></div>
+    </div>`;
+  }).join('');
 }
 
 function disconnect() {
