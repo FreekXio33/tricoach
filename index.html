@@ -108,8 +108,16 @@
 
   /* PROGRAMME */
   .week-plan { display: grid; gap: 8px; }
-  .day-card { background: var(--surface); border-radius: 10px; padding: 0.85rem 1rem; border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .day-card { background: var(--surface); border-radius: 10px; padding: 0.85rem 1rem; border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; position: relative; transition: border-color 0.15s, transform 0.1s; }
   .day-card.rest { opacity: 0.5; }
+  .day-card.dragging { opacity: 0.35; transform: scale(0.97); }
+  .day-card.drag-over { border-color: var(--accent) !important; background: rgba(199,125,255,0.06) !important; transform: scale(1.01); }
+  .moved-badge { display:inline-block;background:rgba(247,127,0,0.15);color:var(--bike);border:1px solid rgba(247,127,0,0.3);border-radius:10px;font-size:0.58rem;font-weight:700;padding:1px 5px;margin-left:5px;vertical-align:middle;letter-spacing:0.3px; }
+  /* DAY PICKER */
+  .day-picker-popup { position:fixed;z-index:350;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:0.5rem;box-shadow:0 8px 28px rgba(0,0,0,0.45);min-width:215px; }
+  .dpp-item { display:flex;align-items:center;gap:8px;padding:0.32rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.8rem;transition:background 0.1s; }
+  .dpp-item:hover:not(.dpp-current) { background:var(--surface2); }
+  .dpp-current { opacity:0.4;cursor:default; }
   .day-label { font-family: 'Bebas Neue', sans-serif; font-size: 1rem; width: 32px; color: var(--muted); flex-shrink: 0; }
   .day-stripe { width: 4px; height: 38px; border-radius: 2px; flex-shrink: 0; }
   .day-stripe.swim { background: var(--swim); }
@@ -397,7 +405,10 @@
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;">Programme S<span id="weekNum">-</span></div>
         <div style="font-size:0.78rem;color:var(--muted);">Généré par IA · basé sur tes activités réelles</div>
       </div>
-      <button id="regenBtn" onclick="generatePlan()" style="background:var(--surface2);color:var(--accent);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.85rem;font-size:0.8rem;cursor:pointer;font-family:'DM Sans',sans-serif;">↻ Régénérer</button>
+      <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;">
+        <button id="regenBtn" onclick="generatePlan()" style="background:var(--surface2);color:var(--accent);border:1px solid var(--border);border-radius:8px;padding:0.45rem 0.85rem;font-size:0.8rem;cursor:pointer;font-family:'DM Sans',sans-serif;">↻ Régénérer</button>
+        <button id="resetBtn" onclick="resetWeekSchedule()" style="display:none;background:none;color:var(--bike);border:1px solid rgba(247,127,0,0.3);border-radius:8px;padding:0.35rem 0.7rem;font-size:0.72rem;cursor:pointer;font-family:'DM Sans',sans-serif;">↺ Réinitialiser</button>
+      </div>
     </div>
     <div id="planLoading" class="spinner" style="display:none;"></div>
     <div id="adaptBanner" style="display:none;"></div>
@@ -491,6 +502,9 @@
   </div>
 </div>
 
+<!-- DAY PICKER POPUP -->
+<div id="dayPickerPopup" class="day-picker-popup" style="display:none;" onclick="event.stopPropagation()"></div>
+
 <!-- DEBRIEF MODAL -->
 <div id="debriefModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeDebrief()">
   <div class="modal-sheet">
@@ -522,6 +536,10 @@ let currentAnalysis = null;
 let currentAdaptInfo = null;
 let standardPlanDays = null;
 let _showingStandard = false;
+let movedDays = new Set();
+let originalPlanDays = null;
+let _dragSrcIdx = null;
+let _pickerOpenIdx = null;
 
 // ===== INIT =====
 window.addEventListener('load', async () => {
@@ -824,27 +842,40 @@ function formatPace(mps) {
 // ===== PLAN =====
 function renderWeekPlanDays(days) {
   const today = new Date().toISOString().split('T')[0];
+  const TYPE_COL = { swim:'var(--swim)', bike:'var(--bike)', run:'var(--run)', brick:'var(--bike)', rest:'var(--muted)' };
   document.getElementById('weekPlan').innerHTML = days.map((d, i) => {
     const isDone = localStorage.getItem(`done_${today}_${i}`) === '1';
     const safeTitle = d.title.replace(/'/g,'').replace(/"/g,'');
     const isAdapted = d.title.endsWith('🔄');
-    return `<div class="day-card ${d.type === 'rest' ? 'rest' : ''}" id="dayCard-${i}">
+    const isMoved   = movedDays.has(i) && !_showingStandard;
+    const draggable = d.type !== 'rest';
+    return `<div class="day-card ${d.type === 'rest' ? 'rest' : ''}" id="dayCard-${i}"
+      ${draggable ? `draggable="true" ondragstart="dragStart(event,${i})" ondragend="dragEnd(event,${i})"` : ''}
+      ondragover="dragOver(event)" ondragenter="dragEnter(event,${i})" ondragleave="dragLeave(event,${i})" ondrop="dragDrop(event,${i})">
       <div class="day-label">${d.day}</div>
       <div class="day-stripe ${d.type}"></div>
-      <div class="day-info">
-        <div class="day-title">${d.title}</div>
+      <div class="day-info" style="overflow:hidden;">
+        <div class="day-title">${d.title}${isMoved ? '<span class="moved-badge">Déplacé</span>' : ''}</div>
         <div class="day-desc">${d.desc}</div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
         ${d.duration ? `<div class="day-duration" style="${isAdapted?'color:var(--bike);':''}">${d.duration}</div>` : ''}
         ${d.type !== 'rest' ? `
-          <button onclick="openSessionModal(${i})" style="background:rgba(199,125,255,0.1);color:var(--accent);border:1px solid rgba(199,125,255,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📋 Voir</button>
+          <div style="display:flex;gap:3px;">
+            <button onclick="openSessionModal(${i})" style="background:rgba(199,125,255,0.1);color:var(--accent);border:1px solid rgba(199,125,255,0.2);border-radius:6px;padding:2px 7px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;">📋</button>
+            <button onclick="openDayPicker(${i},event)" style="background:rgba(247,127,0,0.1);color:var(--bike);border:1px solid rgba(247,127,0,0.25);border-radius:6px;padding:2px 7px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;" title="Déplacer cette séance">↕</button>
+          </div>
           <button onclick="markDayDone(${i},'${safeTitle}','${d.type}')" id="doneBtn-${i}" style="background:${isDone?'var(--run)':'var(--surface2)'};color:${isDone?'white':'var(--muted)'};border:1px solid ${isDone?'transparent':'var(--border)'};border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">${isDone?'✓ Fait':'Valider'}</button>
           <button onclick="openDebrief(${i})" id="debriefBtn-${i}" style="display:${isDone?'block':'none'};background:rgba(6,214,160,0.1);color:var(--run);border:1px solid rgba(6,214,160,0.2);border-radius:6px;padding:2px 8px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">📝 Débrief</button>
-        ` : ''}
+        ` : `
+          <button onclick="openDayPicker(${i},event)" style="background:rgba(247,127,0,0.1);color:var(--bike);border:1px solid rgba(247,127,0,0.25);border-radius:6px;padding:2px 7px;font-size:0.68rem;font-family:'DM Sans',sans-serif;cursor:pointer;" title="Placer une séance ici">↕</button>
+        `}
       </div>
     </div>`;
   }).join('');
+  // Show/hide reset button
+  const resetBtn = document.getElementById('resetBtn');
+  if (resetBtn) resetBtn.style.display = movedDays.size > 0 && !_showingStandard ? 'block' : 'none';
 }
 
 async function generatePlan() {
@@ -855,6 +886,7 @@ async function generatePlan() {
   const adaptBannerEl = document.getElementById('adaptBanner');
   if (adaptBannerEl) adaptBannerEl.style.display = 'none';
   _showingStandard = false;
+  movedDays.clear();
 
   await new Promise(r => setTimeout(r, 80));
 
@@ -869,6 +901,14 @@ async function generatePlan() {
     currentAnalysis  = analysis;
     currentAdaptInfo = adaptInfo;
     standardPlanDays = basePlan.days;
+    originalPlanDays = plan.days.map(d => ({...d}));
+
+    // Restore any saved custom schedule for this week
+    const saved = await loadSavedSchedule();
+    if (saved) {
+      currentPlan = { ...plan, days: saved };
+      saved.forEach((d, i) => { if (d.title !== plan.days[i]?.title) movedDays.add(i); });
+    }
 
     document.getElementById('planLoading').style.display = 'none';
     document.getElementById('regenBtn').disabled = false;
@@ -2673,6 +2713,186 @@ async function saveGoals() {
   await sbSaveWeeklyGoals({ swim, bike, run });
   renderWeeklyGoalsWidget();
 }
+
+// ===== DRAG & DROP / SCHEDULE =====
+
+function dragStart(e, idx) {
+  _dragSrcIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', idx);
+  setTimeout(() => {
+    const c = document.getElementById(`dayCard-${idx}`);
+    if (c) c.classList.add('dragging');
+  }, 0);
+}
+
+function dragEnd(e, idx) {
+  const c = document.getElementById(`dayCard-${idx}`);
+  if (c) c.classList.remove('dragging');
+  document.querySelectorAll('.day-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _dragSrcIdx = null;
+}
+
+function dragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function dragEnter(e, idx) {
+  e.preventDefault();
+  if (_dragSrcIdx === null || _dragSrcIdx === idx) return;
+  const c = document.getElementById(`dayCard-${idx}`);
+  if (c) c.classList.add('drag-over');
+}
+
+function dragLeave(e, idx) {
+  const c = document.getElementById(`dayCard-${idx}`);
+  if (c && !c.contains(e.relatedTarget)) c.classList.remove('drag-over');
+}
+
+function dragDrop(e, dstIdx) {
+  e.preventDefault();
+  const c = document.getElementById(`dayCard-${dstIdx}`);
+  if (c) c.classList.remove('drag-over');
+  if (_dragSrcIdx === null || _dragSrcIdx === dstIdx) return;
+  swapDays(_dragSrcIdx, dstIdx);
+}
+
+function swapDays(srcIdx, dstIdx) {
+  if (!currentPlan || srcIdx === dstIdx) return;
+  const days = currentPlan.days.map(d => ({...d}));
+  // Swap workout content, preserve day labels (LUN/MAR/…)
+  const fields = ['key','type','title','desc','duration'];
+  const tmp = {};
+  fields.forEach(f => { tmp[f] = days[srcIdx][f]; days[srcIdx][f] = days[dstIdx][f]; days[dstIdx][f] = tmp[f]; });
+  currentPlan = { ...currentPlan, days };
+  movedDays.add(srcIdx);
+  movedDays.add(dstIdx);
+  renderWeekPlanDays(days);
+  savePlanToSupabase();
+}
+
+const _TICON = { swim:'🏊', bike:'🚴', run:'🏃', brick:'⚡', rest:'😴' };
+
+function openDayPicker(srcIdx, e) {
+  e.stopPropagation();
+  if (_pickerOpenIdx === srcIdx) { closeDayPicker(); return; }
+  closeDayPicker();
+  _pickerOpenIdx = srcIdx;
+  const popup = document.getElementById('dayPickerPopup');
+  if (!popup || !currentPlan) return;
+  const days = currentPlan.days;
+  popup.innerHTML = `<div style="font-size:0.67rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:0.1rem 0.5rem 0.45rem;">Déplacer vers</div>` +
+    days.map((d, i) => {
+      const icon = _TICON[d.type] || '📌';
+      const isCurrent = i === srcIdx;
+      const isSwap = !isCurrent && d.type !== 'rest';
+      return `<div class="dpp-item ${isCurrent ? 'dpp-current' : ''}" ${!isCurrent ? `onclick="pickDay(${srcIdx},${i})"` : ''}>
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:0.9rem;width:26px;color:var(--accent);">${d.day}</span>
+        <span>${icon}</span>
+        <span style="font-size:0.75rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${isCurrent ? '← ici' : d.type === 'rest' ? 'Repos' : d.title.replace(' 🔄','')}</span>
+        ${isSwap ? '<span style="font-size:0.7rem;color:var(--bike);flex-shrink:0;">⇄</span>' : ''}
+      </div>`;
+    }).join('');
+  // Position near button
+  const btn = e.currentTarget;
+  const r = btn.getBoundingClientRect();
+  const pw = 220;
+  const left = Math.min(r.left, window.innerWidth - pw - 10);
+  popup.style.left = Math.max(8, left) + 'px';
+  popup.style.top  = Math.min(r.bottom + 4, window.innerHeight - 300) + 'px';
+  popup.style.display = 'block';
+}
+
+function closeDayPicker() {
+  const p = document.getElementById('dayPickerPopup');
+  if (p) p.style.display = 'none';
+  _pickerOpenIdx = null;
+}
+
+function pickDay(srcIdx, dstIdx) {
+  closeDayPicker();
+  swapDays(srcIdx, dstIdx);
+}
+
+function resetWeekSchedule() {
+  if (!originalPlanDays) return;
+  currentPlan = { ...currentPlan, days: originalPlanDays.map(d => ({...d})) };
+  movedDays.clear();
+  renderWeekPlanDays(currentPlan.days);
+  clearSavedSchedule();
+}
+
+async function savePlanToSupabase() {
+  const weekStart = getWeekMonday().toISOString().split('T')[0];
+  // Always save to localStorage
+  const rows = currentPlan.days.map((d, i) => ({
+    day_index: i, key: d.key || d.type, type: d.type,
+    title: d.title, desc: d.desc, duration: d.duration || ''
+  }));
+  localStorage.setItem(`schedule_${weekStart}`, JSON.stringify(rows));
+  if (!_sb || !_sbReady || !athlete) return;
+  try {
+    const sbRows = currentPlan.days.map((d, i) => ({
+      athlete_id: athlete.id, week_start: weekStart, day_index: i,
+      workout_type: d.type, workout_title: d.title,
+      workout_desc: JSON.stringify({ key: d.key || d.type, desc: d.desc }),
+      duration: d.duration || null,
+    }));
+    await _sb.from('workout_schedule').upsert(sbRows, { onConflict: 'athlete_id,week_start,day_index' });
+  } catch(e) { console.warn('savePlanToSupabase', e); }
+}
+
+async function loadSavedSchedule() {
+  const weekStart = getWeekMonday().toISOString().split('T')[0];
+  const dayLabels = ['LUN','MAR','MER','JEU','VEN','SAM','DIM'];
+  const parse = rows => rows.map((r, i) => ({
+    day: dayLabels[r.day_index ?? i], key: r.key || r.type, type: r.type,
+    title: r.title, desc: r.desc, duration: r.duration || ''
+  }));
+  if (_sb && _sbReady && athlete) {
+    try {
+      const { data, error } = await _sb.from('workout_schedule')
+        .select('*').eq('athlete_id', athlete.id).eq('week_start', weekStart).order('day_index');
+      if (!error && data && data.length === 7) {
+        const mapped = data.map(r => {
+          let k = r.workout_type, desc = r.workout_desc || '';
+          try { const p = JSON.parse(r.workout_desc); k = p.key || k; desc = p.desc || desc; } catch {}
+          return { day: dayLabels[r.day_index], key: k, type: r.workout_type,
+                   title: r.workout_title, desc, duration: r.duration || '' };
+        });
+        // Only return if it differs from current plan (i.e. user made custom moves)
+        const differs = mapped.some((d, i) => d.title !== currentPlan?.days[i]?.title);
+        if (differs) return mapped;
+      }
+    } catch {}
+  }
+  const ls = localStorage.getItem(`schedule_${weekStart}`);
+  if (ls) {
+    try {
+      const rows = JSON.parse(ls);
+      if (rows.length === 7) {
+        const mapped = parse(rows);
+        const differs = mapped.some((d, i) => d.title !== currentPlan?.days[i]?.title);
+        if (differs) return mapped;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function clearSavedSchedule() {
+  const weekStart = getWeekMonday().toISOString().split('T')[0];
+  localStorage.removeItem(`schedule_${weekStart}`);
+  if (!_sb || !_sbReady || !athlete) return;
+  try {
+    await _sb.from('workout_schedule').delete()
+      .eq('athlete_id', athlete.id).eq('week_start', weekStart);
+  } catch(e) { console.warn('clearSavedSchedule', e); }
+}
+
+// Close picker when clicking outside
+document.addEventListener('click', closeDayPicker);
 
 // ===== ADAPTATION ENGINE =====
 
